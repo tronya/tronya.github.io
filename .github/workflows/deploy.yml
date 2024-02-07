@@ -21,7 +21,7 @@ jobs:
         run: npm install
 
       - name: Build Angular app
-        run: ng build --prod --base-href /tronya.github.io/
+        run: ng build --configuration production --base-href /tronya.github.io/
 
   # Deployment job
   deploy:
