@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "mono-banka": {
+    "tronya.github.io": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -17,7 +17,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:application",
           "options": {
-            "outputPath": "dist/mono-banka",
+            "outputPath": "dist/tronya.github.io",
             "index": "src/index.html",
             "browser": "src/main.ts",
             "polyfills": ["zone.js"],
@@ -55,10 +55,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "mono-banka:build:production"
+              "buildTarget": "tronya.github.io:build:production"
             },
             "development": {
-              "buildTarget": "mono-banka:build:development"
+              "buildTarget": "tronya.github.io:build:development"
             }
           },
           "defaultConfiguration": "development"
@@ -66,7 +66,7 @@
         "extract-i18n": {
           "builder": "@angular-devkit/build-angular:extract-i18n",
           "options": {
-            "buildTarget": "mono-banka:build"
+            "buildTarget": "tronya.github.io:build"
           }
         },
         "test": {

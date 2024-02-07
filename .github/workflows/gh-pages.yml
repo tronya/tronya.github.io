@@ -18,7 +18,7 @@ jobs:
           node-version: '14'
 
       - name: Install dependencies
-        run: npm install
+        run: yarn
 
       - name: Build project
         run: ng build --configuration production --base-href /tronya.github.io/

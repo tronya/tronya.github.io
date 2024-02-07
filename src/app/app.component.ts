@@ -25,7 +25,6 @@ interface IResponse {
   imports: [CommonModule, HttpClientModule, RxLet],
 })
 export class AppComponent {
-  title = 'mono-banka';
   http = inject(HttpClient);
 
   req$ = interval(10000).pipe(
@@ -37,7 +36,7 @@ export class AppComponent {
         .pipe(
           map((res) => {
             console.log(res);
-            
+
             return {
               ...res,
               amount: res.amount.toString().slice(0, -2),
