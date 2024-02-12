@@ -4,6 +4,7 @@ import { interval, map, switchMap, timer } from 'rxjs';
 import { RxLet } from '@rx-angular/template/let';
 import { CommonModule } from '@angular/common';
 import { environment } from '../environments/environment';
+import { TextComponent } from './text/text.component';
 
 interface IResponse {
   amount: number;
@@ -23,7 +24,7 @@ interface IResponse {
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
   standalone: true,
-  imports: [CommonModule, HttpClientModule, RxLet],
+  imports: [CommonModule, HttpClientModule, RxLet, TextComponent],
   host: { class: 'h-full w-full' },
 })
 export class AppComponent {
@@ -37,7 +38,7 @@ export class AppComponent {
       this.http.get<IResponse>(this.link).pipe(
         map((res) => {
           console.log(res);
-          
+
           return {
             ...res,
             amount: res.amount.toString().slice(0, -2),
@@ -49,11 +50,13 @@ export class AppComponent {
   );
 
   constructor() {
-    interval(60 * 60 * 1000).pipe(
-      map(() => {
-        console.log('reloading');
-        window.location.reload();
-      })
-    ).subscribe();
+    interval(60 * 60 * 1000)
+      .pipe(
+        map(() => {
+          console.log('reloading');
+          window.location.reload();
+        })
+      )
+      .subscribe();
   }
 }
