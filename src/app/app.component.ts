@@ -3,6 +3,7 @@ import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { interval, map, switchMap } from 'rxjs';
 import { RxLet } from '@rx-angular/template/let';
 import { CommonModule } from '@angular/common';
+import { environment } from '../environments/environment';
 
 interface IResponse {
   amount: number;
@@ -25,25 +26,19 @@ interface IResponse {
   imports: [CommonModule, HttpClientModule, RxLet],
 })
 export class AppComponent {
+  title = 'mono-banka';
   http = inject(HttpClient);
+  JAR_KEY = environment.JAR_KEY;
+  link = `https://api.monobank.ua/bank/jar/HfSCkWGoDun87SYGstsK9q594bTVYp`;
 
-  req$ = interval(10000).pipe(
-    switchMap(() =>
-      this.http
-        .get<IResponse>(
-          'https://api.monobank.ua/bank/jar/'
-        )
-        .pipe(
-          map((res) => {
-            console.log({res});
-
-            return {
-              ...res,
-              amount: res.amount.toString().slice(0, -2),
-              goal: res.goal.toString().slice(0, -2),
-            };
-          })
-        )
-    )
+  req$ = this.http.get<IResponse>(this.link).pipe(
+    map((res) => {
+      console.log(res);
+      return {
+        ...res,
+        amount: res.amount.toString().slice(0, -2),
+        goal: res.goal.toString().slice(0, -2),
+      };
+    })
   );
 }
