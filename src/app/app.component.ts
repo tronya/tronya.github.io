@@ -37,6 +37,7 @@ export class AppComponent {
       this.http.get<IResponse>(this.link).pipe(
         map((res) => {
           console.log(res);
+          
           return {
             ...res,
             amount: res.amount.toString().slice(0, -2),
