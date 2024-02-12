@@ -5,6 +5,12 @@
 @import url("https://fonts.googleapis.com/css2?family=Honk&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Honk&family=Roboto&display=swap");
 
+body {
+  height: 100vh;
+  background-color: #293133;
+  color: #8fbbbc;
+}
+
 .honk {
   font-family: "Honk", system-ui;
 }
