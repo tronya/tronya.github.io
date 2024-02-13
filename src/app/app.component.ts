@@ -1,10 +1,12 @@
 import { Component, inject } from '@angular/core';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
-import { interval, map, switchMap, timer } from 'rxjs';
+import { interval, map, of, switchMap, timer } from 'rxjs';
 import { RxLet } from '@rx-angular/template/let';
 import { CommonModule } from '@angular/common';
 import { environment } from '../environments/environment';
-import { TextComponent } from './text/text.component';
+import { CharacterComponent } from './character/character.component';
+import { DigitsComponent } from './digits/digits.component';
+import { PlaneComponent } from './plane.component';
 
 interface IResponse {
   amount: number;
@@ -24,7 +26,14 @@ interface IResponse {
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
   standalone: true,
-  imports: [CommonModule, HttpClientModule, RxLet, TextComponent],
+  imports: [
+    CommonModule,
+    HttpClientModule,
+    RxLet,
+    CharacterComponent,
+    DigitsComponent,
+    PlaneComponent
+  ],
   host: { class: 'h-full w-full' },
 })
 export class AppComponent {
@@ -33,7 +42,15 @@ export class AppComponent {
   JAR_KEY = environment.JAR_KEY;
   link = `https://api.monobank.ua/bank/jar/HfSCkWGoDun87SYGstsK9q594bTVYp`;
 
-  req$ = timer(0, 1 * 60 * 1000).pipe(
+  req$ = 
+  // of({
+  //   description: 'soo',
+  //   amount: '13232',
+  //   goal: '24334',
+  //   title: 'sraka',
+  // });
+
+  timer(0, 1 * 60 * 1000).pipe(
     switchMap(() =>
       this.http.get<IResponse>(this.link).pipe(
         map((res) => {

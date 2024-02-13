@@ -1,0 +1,15 @@
+<svg
+  [attr.width]="svgWidth"
+  [attr.height]="svgHeight"
+  [attr.viewport.width]="svgWidth"
+>
+  <g>
+    <circle
+      *ngFor="let cell of flattenedMatrix"
+      [attr.cx]="cell.cx"
+      [attr.cy]="cell.cy"
+      [attr.r]="cell.r"
+      [attr.fill]="cell.color"
+    ></circle>
+  </g>
+</svg>
