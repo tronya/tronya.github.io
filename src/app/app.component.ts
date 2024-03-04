@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, ViewEncapsulation, inject } from '@angular/core';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { interval, map, of, switchMap, timer } from 'rxjs';
 import { RxLet } from '@rx-angular/template/let';
@@ -7,6 +7,7 @@ import { environment } from '../environments/environment';
 import { CharacterComponent } from './character/character.component';
 import { DigitsComponent } from './digits/digits.component';
 import { PlaneComponent } from './plane.component';
+import { CanvaComponent } from './canva/canva.component';
 
 interface IResponse {
   amount: number;
@@ -33,8 +34,10 @@ interface IResponse {
     CharacterComponent,
     DigitsComponent,
     PlaneComponent,
+    CanvaComponent,
   ],
-  host: { class: 'h-full w-full' },
+  host: { class: 'h-full w-full bg-black' },
+  encapsulation: ViewEncapsulation.None,
 })
 export class AppComponent {
   title = 'mono-banka';

@@ -1,7 +1,7 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { CharacterComponent } from '../character/character.component';
 import { CommonModule } from '@angular/common';
-import { NUMBERS_MAP } from '../character/numbers';
+import { NUMBERS_MAP } from '../canva/helpers/numbers';
 
 @Component({
   selector: 'digits',

@@ -8,16 +8,14 @@ import * as d3 from 'd3';
 })
 export class PlaneComponent implements OnInit {
   @ViewChild('svg') svg?: ElementRef<HTMLDivElement>;
-//   container;
+  //   container;
   ngOnInit() {
     setTimeout(() => {
       if (!this.svg) return;
       console.log(this.svg);
       const svg = d3.select(this.svg.nativeElement);
       console.log(svg);
-      svg.attr('viewBox', `0 0 600 600`)
-      .attr('width', 600)
-      .attr('height', 600);
+      svg.attr('viewBox', `0 0 600 600`).attr('width', 600).attr('height', 600);
 
       svg
         .append('circle')
@@ -26,11 +24,7 @@ export class PlaneComponent implements OnInit {
         .attr('r', 4)
         .attr('fill', 'black');
 
-
-
-
-        // requestAnimationFrame()
-
+      // requestAnimationFrame()
     }, 1000);
   }
 }
