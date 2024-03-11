@@ -32,9 +32,9 @@ export class Dot implements DOT {
     this.radius = radius;
     this.initialPosition = { cx: position.cx, cy: position.cy };
     this.color = color;
-    this.direction = Math.random();
-    this.velocityX = Math.random() * 20;
-    this.velocityY = Math.random() * 20;
+    this.direction = Math.random() * Math.PI;
+    this.velocityX = Math.random();
+    this.velocityY = Math.random();
 
     //
     const dot = document.createElementNS(
@@ -49,5 +49,3 @@ export class Dot implements DOT {
     this.dotCircle = dot;
   }
 }
-
-

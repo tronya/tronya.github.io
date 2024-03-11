@@ -23,7 +23,7 @@ export class CanvaComponent
     this.set({ amount });
   }
 
-  particles = new Particles(2000);
+  particles = new Particles(200, 500, 500, 'green');
   animate$ = new BehaviorSubject(0);
 
   constructor() {

@@ -10,7 +10,7 @@ export class BlackHole {
     x: number,
     y: number,
     radius: number = 200,
-    speed: number = 2,
+    speed: number = 1,
     direction: number = 2
   ) {
     this.x = x;

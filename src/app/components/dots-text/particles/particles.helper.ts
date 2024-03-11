@@ -1,4 +1,17 @@
-const colors = ['#468966', '#FFF0A5', '#FFB03B', '#B64926', '#8E2800'];
+const colors = ['#6C22A6', '#6962AD', '#83C0C1', '#96E9C6', '#fff'];
+export interface IResponse {
+  amount: number;
+  goal: number;
+  ownerIcon: string;
+  title: string;
+  ownerName: string;
+  currency: number;
+  description: string;
+  jarId: string;
+  blago: boolean;
+  closed: boolean;
+}
+
 export class Particle {
   x: number;
   y: number;
@@ -41,6 +54,7 @@ export class Particle {
     this.x += this.vx;
     this.y += this.vy;
 
+    
     ctx.fillStyle = this.color;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2, false); // Corrected arguments
