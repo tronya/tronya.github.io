@@ -19,7 +19,5 @@ export class MoneyCounterComponent {
     map(([prev, newItem]) => newItem - prev)
   );
 
-  constructor() {
-    this.httpJAR.responce$.subscribe((res) => console.log('current', res));
-  }
+  constructor() {}
 }

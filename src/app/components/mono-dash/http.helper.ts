@@ -19,28 +19,13 @@ export class HttpMonoServer {
   JAR_KEY = environment.JAR_KEY;
   link = `https://api.monobank.ua/bank/jar/HfSCkWGoDun87SYGstsK9q594bTVYp`;
 
-  // req$ = timer(0, 1 * 30 * 1000).pipe(
-  //   switchMap(() =>
-  //     this.http
-  //       .get<IResponse>(this.link)
-  //       .pipe(map((res) => +res.amount.toString().slice(0, -2)))
-  //   ),
-  responce$ = of(
-    33333,
-    33333,
-    33333,
-    33333,
-    33370,
-    52300,
-    12200,
-    23000,
-    22,
-    12954,
-    34000,
-    5,
-    5
-  ).pipe(
+  responce$ = timer(0, 1 * 30 * 1000).pipe(
+    switchMap(() =>
+      this.http
+        .get<IResponse>(this.link)
+        .pipe(map((res) => +res.amount.toString().slice(0, -2)))
+    ),
     concatMap((number) => of(number).pipe(delay(2000))),
-    distinctUntilChanged(),
+    distinctUntilChanged()
   );
 }
