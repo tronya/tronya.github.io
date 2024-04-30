@@ -1,0 +1,10 @@
+<div>
+  @for(page of activeNumbers(); track page ){
+  <button
+    class="bg-blue-400 px-2 py-2 text-black rounded-sm leading-none mx-2"
+    (click)="pageClicked(page)"
+  >
+    {{ page }}
+  </button>
+  }
+</div>

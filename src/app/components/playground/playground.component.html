@@ -1,4 +1,13 @@
-<h1>You r on the play ground</h1>
-<ng-container *rxLet="tick$; let tick">
-  <p class="text-sm p-4">{{ tick }}</p>
-</ng-container>
+<div class="wrapper flex justify-center">
+  <div class="container">
+    @defer {
+    <movies></movies>
+    } @loading{
+    <p>Loading</p>
+    } @placeholder (minimum 500ms) {
+    <div class="flex align-middle justify-center">
+      <p class="text-yellow-500">Placeholder for MOVIES</p>
+    </div>
+    }
+  </div>
+</div>

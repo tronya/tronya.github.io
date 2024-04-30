@@ -1,0 +1,14 @@
+<div>
+  @for( row of qr_jar; track row){
+  <div class="flex">
+    @for(col of row; track col){
+    <div>
+      <div
+        [ngClass]="{ 'bg-white': col, 'bg-black': !col }"
+        class="w-5 h-5 rounded-lg"
+      ></div>
+    </div>
+    }
+  </div>
+  }
+</div>

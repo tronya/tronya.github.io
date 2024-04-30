@@ -1,0 +1,17 @@
+<div class="p-4">
+  <div class="grid grid-cols-2">
+    @if(movies(); as movies){ @for(movie of movies; track movie.id ){ 
+      @defer(on viewport){
+    <movie [movie]="movie"></movie>
+    }@loading {
+    <p>Loading</p>
+    }@placeholder {
+    <p>Placeholder</p>
+    } } }
+  </div>
+  <div class="flex justify-center">
+    <div class="p-4">
+      <paginator (activePage)="pageClicked($event)"></paginator>
+    </div>
+  </div>
+</div>

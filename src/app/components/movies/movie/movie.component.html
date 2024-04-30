@@ -1,0 +1,23 @@
+@if(movie(); as movie){ @defer {
+
+<!-- <div class="text-center absolute w-full top-0 left-0 mix-blend-color-dodge bg-white">
+      <p class="p-4 font-bold uppercase">Movie {{ movie.title }}</p>
+    </div> -->
+<div style="aspect-ratio: 9 /16">
+  <img
+    src="{{ imageUrl }}{{ movie.poster_path }}"
+    alt="{{ movie.original_title }}"
+    (load)="imageLoaded($event)"
+    [ngStyle]="{ opacity: loaded() ? 1 : 0 }"
+  />
+
+  @if (!loaded()){
+  <p>Not loaded</p>
+  }
+</div>
+
+} @placeholder {
+<p>This would be your movie</p>
+}@loading {
+<p>This loading for movie</p>
+} }
