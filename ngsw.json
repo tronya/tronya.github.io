@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1714464431614,
+  "timestamp": 1714472914819,
   "index": "/index.html",
   "assetGroups": [
     {
@@ -11,13 +11,13 @@
         "ignoreVary": true
       },
       "urls": [
-        "/chunk-24JA6E2O.js",
-        "/chunk-4RVL766F.js",
-        "/chunk-EHYS7SKS.js",
-        "/chunk-OXS5V4NO.js",
+        "/chunk-53FPANSA.js",
+        "/chunk-DZEMTK2P.js",
+        "/chunk-JXFU5V3T.js",
+        "/chunk-M4PNL6A2.js",
         "/favicon.ico",
         "/index.html",
-        "/main-SQVRRJDX.js",
+        "/main-XJHG6HNP.js",
         "/manifest.webmanifest",
         "/polyfills-RT5I6R6G.js",
         "/styles-5AO4BZ3X.css"
@@ -54,13 +54,13 @@
     "/assets/icons/icon-512x512.png": "1de182f76f7329dfa8f9fcdd1fdcdd695bea6a99",
     "/assets/icons/icon-72x72.png": "aa88a6096bd973be7f6d7a5489bfa6bc2463f8c4",
     "/assets/icons/icon-96x96.png": "7fb8f59c30ce2ff12c700321a0b39e14b3dc8f95",
-    "/chunk-24JA6E2O.js": "9caaebc2a4624a0926d2e2d56056aad05aa40934",
-    "/chunk-4RVL766F.js": "a00f5daa13e4b51d580c8d2544b93b6f3aa321e6",
-    "/chunk-EHYS7SKS.js": "66f73bf2cb23e9e93000e1b08cabbee51d254320",
-    "/chunk-OXS5V4NO.js": "22b2d8085dee677c0ee14823c315268fcb88543a",
+    "/chunk-53FPANSA.js": "4de3d4467d54b57b57f01e0f76cd24d5387f1fbc",
+    "/chunk-DZEMTK2P.js": "be8c1a0f7819987108866a09a61d72ebe2754480",
+    "/chunk-JXFU5V3T.js": "2454166d729a306d16f1eb236861c4982edbedd8",
+    "/chunk-M4PNL6A2.js": "6d225bbe02623ca2361a0876c61fa456d6e19767",
     "/favicon.ico": "9c39f434fe1261f68c5e3eefdf734630d99c5670",
-    "/index.html": "8d9fc8acf44002a016345b4735bb88db5dc0c428",
-    "/main-SQVRRJDX.js": "cf60ee22629a421f739fba298b1501dcbe53f2d9",
+    "/index.html": "9cffbc35e50a8ad15730f60bfe49418a68b1c8b9",
+    "/main-XJHG6HNP.js": "c0643ccd6ecfcd7cfa68e29855293accd59015b9",
     "/manifest.webmanifest": "867f3adba66619b1d475c7aa9ed33c316eae22bc",
     "/polyfills-RT5I6R6G.js": "fe9f024576f21ff6314cf8f8332cde58b9a12416",
     "/styles-5AO4BZ3X.css": "2f2fd78edc52c259a8c7fdfdc5e64721fe9bb440"
