@@ -1,18 +1,13 @@
-import {
-  timer,
-  switchMap,
-  map,
-  distinctUntilChanged,
-  scan,
-  startWith,
-  of,
-  concatMap,
-  delay,
-} from 'rxjs';
-import { IResponse } from '../dots-text/particles/particles.helper';
-import { HttpClient, HttpClientModule } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { inject } from '@angular/core';
+import {
+  distinctUntilChanged,
+  map,
+  switchMap,
+  timer
+} from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { IResponse } from '../dots-text/particles/particles.helper';
 
 export class HttpMonoServer {
   http = inject(HttpClient);
@@ -25,7 +20,6 @@ export class HttpMonoServer {
         .get<IResponse>(this.link)
         .pipe(map((res) => +res.amount.toString().slice(0, -2)))
     ),
-    concatMap((number) => of(number).pipe(delay(2000))),
     distinctUntilChanged()
   );
 }
