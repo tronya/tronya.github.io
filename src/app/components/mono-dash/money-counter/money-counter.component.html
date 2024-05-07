@@ -2,11 +2,11 @@
   @if( jatReq$ | async; as jar) {
   <h1 class="text-9xl font-bold rowdies-bold">{{ jar }}</h1>
   }
-  <div>
+  <!-- <div>
     @if(diff$ | async; as diff){
     <p [ngClass]="{ 'text-green-400': diff > 0, 'text-red-500': diff < 0 }">
       {{ diff }}
     </p>
     }
-  </div>
+  </div> -->
 </div>
