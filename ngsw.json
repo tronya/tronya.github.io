@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1715066313404,
+  "timestamp": 1715087315591,
   "index": "/index.html",
   "assetGroups": [
     {
@@ -11,13 +11,13 @@
         "ignoreVary": true
       },
       "urls": [
-        "/chunk-4SARIXDM.js",
-        "/chunk-CYGB2L36.js",
-        "/chunk-DIVVAFQ2.js",
-        "/chunk-ZVJTZP6E.js",
+        "/chunk-5HAPFPDM.js",
+        "/chunk-NJKIM3ZT.js",
+        "/chunk-PSPOBMHU.js",
+        "/chunk-UF7Q6JW2.js",
         "/favicon.ico",
         "/index.html",
-        "/main-QIRBJZFS.js",
+        "/main-32HUQBF3.js",
         "/manifest.webmanifest",
         "/polyfills-RT5I6R6G.js",
         "/styles-S2L3OGVH.css"
@@ -54,13 +54,13 @@
     "/assets/icons/icon-512x512.png": "1de182f76f7329dfa8f9fcdd1fdcdd695bea6a99",
     "/assets/icons/icon-72x72.png": "aa88a6096bd973be7f6d7a5489bfa6bc2463f8c4",
     "/assets/icons/icon-96x96.png": "7fb8f59c30ce2ff12c700321a0b39e14b3dc8f95",
-    "/chunk-4SARIXDM.js": "d11bbae9efdfb36c3817d77ae78d2172f011b319",
-    "/chunk-CYGB2L36.js": "aad808da29db4435c2ee49d0912b93e12751855d",
-    "/chunk-DIVVAFQ2.js": "8360afe86661224ab686c43210882ea0712e1e71",
-    "/chunk-ZVJTZP6E.js": "5ea0ddccf8e378262579ed92c9e16ee93b27d0e6",
+    "/chunk-5HAPFPDM.js": "de66690c091c17e00b6185e9465de037ef45456e",
+    "/chunk-NJKIM3ZT.js": "78b06daf23af82a41ae6e3d874fb9a62cb71c0e7",
+    "/chunk-PSPOBMHU.js": "51ca29bfb7f6fdcd139592aafa11b13e00010889",
+    "/chunk-UF7Q6JW2.js": "86aa3871fc0bf1c38c64912fa5cb359a1502268c",
     "/favicon.ico": "9c39f434fe1261f68c5e3eefdf734630d99c5670",
-    "/index.html": "37a26b907717e1e0e9571bb5c8d90af232238878",
-    "/main-QIRBJZFS.js": "1741a82e7109d28d4c170b65b4dec42aae56bc70",
+    "/index.html": "609294566df27c691553a6884ba251f3103bd7db",
+    "/main-32HUQBF3.js": "c869bf9ab2ad5baa7711cb1e1175980cdd81dfed",
     "/manifest.webmanifest": "867f3adba66619b1d475c7aa9ed33c316eae22bc",
     "/polyfills-RT5I6R6G.js": "fe9f024576f21ff6314cf8f8332cde58b9a12416",
     "/styles-S2L3OGVH.css": "0bdbeb1de9ed48d8745d64fa0c2442bb3ce67288"
