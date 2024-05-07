@@ -1,11 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { inject } from '@angular/core';
-import {
-  distinctUntilChanged,
-  map,
-  switchMap,
-  timer
-} from 'rxjs';
+import { distinctUntilChanged, map, switchMap, timer } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { IResponse } from '../dots-text/particles/particles.helper';
 

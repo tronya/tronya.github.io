@@ -14,10 +14,4 @@ export class MoneyCounterComponent {
   httpJAR = inject(HttpMonoServer);
 
   jatReq$ = this.httpJAR.responce$;
-  diff$ = this.jatReq$.pipe(
-    pairwise(),
-    map(([prev, newItem]) => newItem - prev)
-  );
-
-  constructor() {}
 }
