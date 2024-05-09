@@ -1,17 +1,16 @@
-import { Component, inject } from '@angular/core';
-import { HttpMonoServer } from '../http.helper';
 import { CommonModule } from '@angular/common';
-import { map, pairwise, scan } from 'rxjs';
+import { Component, inject } from '@angular/core';
+import { MonoBankApi } from '../../../../api/monobank';
 
 @Component({
   selector: 'money-counter',
   templateUrl: './money-counter.component.html',
   standalone: true,
-  providers: [HttpMonoServer],
+  providers: [MonoBankApi],
   imports: [CommonModule],
 })
 export class MoneyCounterComponent {
-  httpJAR = inject(HttpMonoServer);
+  httpJAR = inject(MonoBankApi);
 
-  jatReq$ = this.httpJAR.responce$;
+  jatReq$ = this.httpJAR.getJarNUmber();
 }

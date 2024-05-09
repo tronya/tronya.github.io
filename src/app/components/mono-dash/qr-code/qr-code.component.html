@@ -1,11 +1,12 @@
 <div>
   @for( row of qr_jar; track row){
   <div class="flex">
-    @for(col of row; track col){
+    @for(col of row; track col.id){
     <div>
       <div
-        [ngClass]="{ 'bg-white': col, 'bg-black': !col }"
-        class="w-5 h-5 rounded-lg"
+        [ngClass]="{ 'bg-transparent': !col.active }"
+        [ngStyle]="{ backgroundColor: col.color, opacity: col.visible }"
+        class="w-5 h-5 rounded-lg bg-white transition-all duration-300"
       ></div>
     </div>
     }
