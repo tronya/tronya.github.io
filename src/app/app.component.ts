@@ -8,7 +8,7 @@ import { RouterModule } from '@angular/router';
   selector: 'app-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
-  host: { class: 'h-full w-full bg-black' },
+  host: { class: 'h-full w-full bg-white' },
   standalone: true,
   imports: [CommonModule, RouterModule, DotsTextComponent],
   encapsulation: ViewEncapsulation.None,
