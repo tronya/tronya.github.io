@@ -1,8 +1,9 @@
+import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { QRCODE_JAR } from '../../ui/canva/helpers/qr-code';
-import { CommonModule } from '@angular/common';
+import { colors } from '../helper';
 
-const colors = ['ed071a', '000', '361417'];
+
 @Component({
   selector: 'qr-code',
   templateUrl: './qr-code.component.html',

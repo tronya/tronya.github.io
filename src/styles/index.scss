@@ -2,9 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url("https://fonts.googleapis.com/css2?family=Honk&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Honk&family=Roboto&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Rowdies:wght@300;400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Pacifico&display=swap");
 
 body {
   height: 100vh;
@@ -12,32 +10,18 @@ body {
   color: #8fbbbc;
 }
 
-.honk {
-  font-family: "Honk", system-ui;
-}
-
-.roboto {
-  font-family: "Roboto", sans-serif;
-}
-
-.rowdies-light {
-  font-family: "Rowdies", sans-serif;
-  font-weight: 300;
-  font-style: normal;
-}
-
-.rowdies-regular {
-  font-family: "Rowdies", sans-serif;
+.pacifico-regular {
+  font-family: "Pacifico", cursive;
   font-weight: 400;
   font-style: normal;
 }
 
-.rowdies-bold {
-  font-family: "Rowdies", sans-serif;
-  font-weight: 700;
+.bebas-neue-regular {
+  font-family: "Bebas Neue", sans-serif;
+  font-weight: 400;
   font-style: normal;
 }
 
 body {
-  font-family: "Roboto", sans-serif;
+  font-family: "Pacifico", cursive;
 }
