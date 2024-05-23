@@ -39,7 +39,8 @@ export class MonoBankApi {
   );
   getJarNUmber() {
     return this.responce.pipe(
-      map((res) => +res.amount.toString().slice(0, -2))
+      map((res) => res.amount.toString()),
+      map((count) => count.slice(0, -2) + '.' + count.slice(-2))
     );
   }
 }
