@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1716460711813,
+  "timestamp": 1716461680486,
   "index": "/index.html",
   "assetGroups": [
     {
@@ -32,6 +32,7 @@
         "ignoreVary": true
       },
       "urls": [
+        "/assets/drone.svg",
         "/assets/icons/icon-128x128.png",
         "/assets/icons/icon-144x144.png",
         "/assets/icons/icon-152x152.png",
@@ -46,6 +47,7 @@
   ],
   "dataGroups": [],
   "hashTable": {
+    "/assets/drone.svg": "c0306233364667d4c5574535adf7f1d8770e0819",
     "/assets/icons/icon-128x128.png": "f912963bdc6d5a38d8f1dd0afbaab2ce8d657acb",
     "/assets/icons/icon-144x144.png": "b155fd5f2fd5d2ea7760721063003c4cd95fd783",
     "/assets/icons/icon-152x152.png": "eae6e0f0c8afb8aaae339e2a569b43e9238e5e6c",
