@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1716461680486,
+  "timestamp": 1716462301112,
   "index": "/index.html",
   "assetGroups": [
     {
@@ -11,16 +11,16 @@
         "ignoreVary": true
       },
       "urls": [
-        "/chunk-2O6UHIVT.js",
-        "/chunk-5YX76K5F.js",
-        "/chunk-QY2BDAFN.js",
-        "/chunk-UTGBID4O.js",
+        "/chunk-7XEMBYIC.js",
+        "/chunk-EWYWAVZ3.js",
+        "/chunk-VW7LREIJ.js",
+        "/chunk-XDMTR6GH.js",
         "/favicon.ico",
         "/index.html",
-        "/main-FIYOYKOQ.js",
+        "/main-BEURQSXG.js",
         "/manifest.webmanifest",
         "/polyfills-RT5I6R6G.js",
-        "/styles-AAXY45JV.css"
+        "/styles-SRGLQWLK.css"
       ],
       "patterns": []
     },
@@ -56,16 +56,16 @@
     "/assets/icons/icon-512x512.png": "1de182f76f7329dfa8f9fcdd1fdcdd695bea6a99",
     "/assets/icons/icon-72x72.png": "aa88a6096bd973be7f6d7a5489bfa6bc2463f8c4",
     "/assets/icons/icon-96x96.png": "7fb8f59c30ce2ff12c700321a0b39e14b3dc8f95",
-    "/chunk-2O6UHIVT.js": "ccdfd3218d96a213c612da665b8a223120730d5f",
-    "/chunk-5YX76K5F.js": "b525ac1f1c074867bdae6be5b142636a7737c015",
-    "/chunk-QY2BDAFN.js": "e284c39e6206a8da3e174799251efc5d32c37d31",
-    "/chunk-UTGBID4O.js": "0cc82a2c977cfdd7109e754b04b157535051fe54",
+    "/chunk-7XEMBYIC.js": "8968906051e645036a37ce304947d0c80b9f1e38",
+    "/chunk-EWYWAVZ3.js": "9ce23b7eaa4614a421da07e84794080fe8cebca2",
+    "/chunk-VW7LREIJ.js": "31a630f6a4cc37e7038ccb91f25e03a82a05d01c",
+    "/chunk-XDMTR6GH.js": "7957351e5358a05aea09799cf159096d7637fa7f",
     "/favicon.ico": "9c39f434fe1261f68c5e3eefdf734630d99c5670",
-    "/index.html": "ccafe0027d6873574c64919a5bf909e79a88dfc8",
-    "/main-FIYOYKOQ.js": "5a6f6a016fdd43d1b43b2d3ecf913ee372329b8f",
+    "/index.html": "7c3ad8983b4fd9cb6e76b7f2082890825dbd31d3",
+    "/main-BEURQSXG.js": "691d5c3b3cc26e16ac2c357df0c85512f88fd983",
     "/manifest.webmanifest": "867f3adba66619b1d475c7aa9ed33c316eae22bc",
     "/polyfills-RT5I6R6G.js": "fe9f024576f21ff6314cf8f8332cde58b9a12416",
-    "/styles-AAXY45JV.css": "e4768f4c3f55a3c2135126874f2feb76f2cc9fe2"
+    "/styles-SRGLQWLK.css": "771d4926c66d31f4dfa4ee9e60cdad55ec159326"
   },
   "navigationUrls": [
     {
