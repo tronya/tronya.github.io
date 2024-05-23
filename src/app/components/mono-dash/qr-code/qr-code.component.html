@@ -5,7 +5,10 @@
     <div>
       <div
         [ngClass]="{ 'bg-transparent': !col.active }"
-        [ngStyle]="{ backgroundColor: col.color, opacity: col.visible }"
+        [ngStyle]="{
+          backgroundColor: col.color,
+          opacity: col.visible,
+        }"
         class="w-5 h-5 rounded-lg bg-white transition-all duration-300"
       ></div>
     </div>
