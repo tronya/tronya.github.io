@@ -17,7 +17,7 @@ export class QRCodeComponent {
         visible: col,
         active: false,
         id: `${i}${y}`,
-        color: ``,
+        color: `transparent`,
       };
     })
   );
