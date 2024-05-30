@@ -1,0 +1,5 @@
+<div class="p-4 flex gap-4">
+  @for(diifItem of items | async; track diifItem.item.guid){
+  <p>{{ diifItem.item.name }} | {{ diifItem.type }}</p>
+  }
+</div>

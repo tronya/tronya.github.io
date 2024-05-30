@@ -1,0 +1,30 @@
+@if(diffResults$ | async; as diff){
+<div class="card">
+  <p-table
+    [value]="diff.results"
+    styleClass="p-datatable-sm p-datatable-gridlines"
+  >
+    <ng-template pTemplate="header" let-columns>
+      <tr>
+        <th>Keys</th>
+        @for(names of diff.titles; track names){
+        <th>{{ names }}</th>
+        }
+      </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-rowData let-columns="columns">
+      <tr>
+        <td>{{ rowData.name }}</td>
+        <td *ngFor="let row of rowData.values">
+          <div class="flex justify-between">
+            <p [ngClass]="{ 'text-red-500': !row.same }" class="m-0">
+              {{ row.value }}
+            </p>
+            <p-tag [value]="row.same" [severity]="getSeverity(row.same)" />
+          </div>
+        </td>
+      </tr>
+    </ng-template>
+  </p-table>
+</div>
+}

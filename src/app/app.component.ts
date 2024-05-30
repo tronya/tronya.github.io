@@ -1,7 +1,5 @@
-import { Component, ViewEncapsulation } from '@angular/core';
-import { DotsTextComponent } from './components/dots-text/dots-text.component';
 import { CommonModule } from '@angular/common';
-import { BrowserModule } from '@angular/platform-browser';
+import { Component, ViewEncapsulation } from '@angular/core';
 import { RouterModule } from '@angular/router';
 
 @Component({
@@ -10,7 +8,7 @@ import { RouterModule } from '@angular/router';
   styleUrls: ['./app.component.scss'],
   host: { class: 'h-full w-full bg-white' },
   standalone: true,
-  imports: [CommonModule, RouterModule, DotsTextComponent],
+  imports: [CommonModule, RouterModule],
   encapsulation: ViewEncapsulation.None,
 })
 export class AppComponent {

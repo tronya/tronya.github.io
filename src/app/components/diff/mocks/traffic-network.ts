@@ -1,0 +1,78 @@
+import { TrafficNetwork, TrafficNetworkDiff } from '../service/models';
+import { nodesMock } from './nodes';
+
+export const trafficNetwork: TrafficNetworkDiff = {
+  guid: '28f392e4-ddde-4d68-90a9-9ffce7163989',
+  tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
+  name: 'par_test1',
+  description: '',
+  geoArea: null,
+  rightHandTraffic: true,
+  displaySpeedUnit: 0,
+  displayLengthUnit: 2,
+  defaultMaxSpeed: 0.0,
+  identifier: '533',
+  nodes: 2169,
+  links: 3869,
+  nodeCount: 2169,
+  nodeClusterCount: 197,
+  linkCount: 3869,
+  externalSourceCount: {
+    WINTICS: 0,
+    IPER: 357,
+  },
+  sectionCount: 0,
+  subnetworkCount: 26,
+  routeCount: 269,
+  extendedGroups: { nodes: nodesMock },
+};
+
+export const trafficNetwork2 = {
+  guid: '28f392e4-ddde-4d68-90a9-sdffsd',
+  tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
+  name: 'par_test12',
+  description: '',
+  geoArea: null,
+  rightHandTraffic: true,
+  displaySpeedUnit: 0,
+  displayLengthUnit: 2,
+  defaultMaxSpeed: 0.0,
+  identifier: '533',
+  nodes: 123,
+  links: 4124,
+  nodeCount: 2169,
+  nodeClusterCount: 197,
+  linkCount: 123123,
+  externalSourceCount: {
+    WINTICS: 0,
+    IPER: 357,
+  },
+  sectionCount: 0,
+  subnetworkCount: 26,
+  routeCount: 269,
+};
+
+export const trafficNetwork3 = {
+  guid: '28f392e4-ddde-4d68-90a9-sd',
+  tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
+  name: 'par_test1243',
+  description: 'This is a description',
+  geoArea: null,
+  rightHandTraffic: true,
+  displaySpeedUnit: 0,
+  displayLengthUnit: 34,
+  defaultMaxSpeed: 0.0,
+  identifier: '443',
+  nodes: 42,
+  links: 34,
+  nodeCount: 444,
+  nodeClusterCount: 197,
+  linkCount: 234,
+  externalSourceCount: {
+    WINTICS: 2,
+    IPER: 3343,
+  },
+  sectionCount: 0,
+  subnetworkCount: 26,
+  routeCount: 4324,
+};
