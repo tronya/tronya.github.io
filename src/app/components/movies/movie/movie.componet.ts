@@ -10,7 +10,7 @@ import { BehaviorSubject } from 'rxjs';
 import { Movie } from '../movies.model';
 import { CommonModule } from '@angular/common';
 import { DataQueryService } from '../service/data-query.service';
-import { HttpClientModule } from '@angular/common/http';
+import {} from '@angular/common/http';
 
 @Component({
   templateUrl: './movie.component.html',
