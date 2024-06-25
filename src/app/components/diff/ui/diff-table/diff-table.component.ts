@@ -1,54 +1,66 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
-import { DiffComparatorService } from '../../service/diff-compare.service';
 import { TagModule } from 'primeng/tag';
+import { DiffComparatorService } from '../../service/diff-compare.service';
 
-import { map as Lmap, keyBy } from 'lodash';
+import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table'; // Import TableModule
-import { Observable, map } from 'rxjs';
-import { CompareResult } from '../../service/models';
+import { map, tap } from 'rxjs';
+import { Table } from '../../service/models';
 
-interface TableItem {
-  keys: string[];
-  results: {
-    name: string;
-    values: CompareResult[];
-  }[];
-  titles: CompareResult['value'][];
-}
+// interface TableItem {
+//   keys: string[];
+//   results: {
+//     name: string;
+//     values: CompareResult[];
+//   }[];
+//   titles: CompareResult['value'][];
+// }
 
 @Component({
   standalone: true,
   selector: 'diff-table',
   templateUrl: './diff-table.component.html',
   providers: [DiffComparatorService],
-  imports: [CommonModule, TableModule, TagModule],
+  imports: [CommonModule, TableModule, TagModule, ButtonModule],
 })
 export class DiffTableComponent {
-  diffResults$: Observable<TableItem> = this.diffComparator.diffResult.pipe(
-    map((diff) => Lmap(diff, (diff) => keyBy(diff, (item) => item.key))),
-    map((data) => {
-      if (data && data.length) {
-        // Get all keys
-        const keys = Object.keys(data[0]);
-        // Transform data to array of rows
-        const titles = data.map((item) => item['name'].value);
-        const results = keys.map((key) => {
-          return {
-            name: data[0][key].name,
-            values: data.map((item) => item[key]),
-          };
-        });
-
-        return { keys, results, titles };
-      }
-      return {
-        keys: [],
-        results: [],
-        titles: [],
-      };
-    })
+  table$ = this.diffComparator.diffResult.pipe(
+    tap((tap) => console.log(tap)),
+    map((data) => this.groupDataTable(data)),
+    tap((tap) => console.log(tap))
   );
+
+  groupDataTable({ name, data }: Table): any[] {
+    const table: any[] = [];
+    const dataTable: any[] = [];
+    data.forEach((group) => {
+      const cluster = group.forEach((item) => {
+        const groups: any[] = [];
+        item.rows.forEach((row) => {
+          const groupData = groups.find((g) => g.key === row.key);
+          if (groupData) {
+            groupData.values.push(row);
+          } else {
+            groups.push({
+              key: row.key,
+              name: row.name,
+              values: [row],
+            });
+          }
+        });
+        return {
+          expanded: item.expanded,
+          group: item.group,
+          name: item.name,
+          rows: groups,
+        };
+      });
+      table.push(cluster);
+    });
+
+    return dataTable;
+  }
 
   constructor(private diffComparator: DiffComparatorService) {}
 

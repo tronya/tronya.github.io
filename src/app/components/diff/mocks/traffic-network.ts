@@ -24,7 +24,7 @@ export const trafficNetwork: TrafficNetworkDiff = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
-  extendedGroups: { nodes: nodesMock },
+  nodesItems: nodesMock,
 };
 
 export const trafficNetwork2 = {

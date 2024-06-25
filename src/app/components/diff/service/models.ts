@@ -1,4 +1,5 @@
-import { NodesSchema, TrafficNetworkSchema } from './schema';
+import { NodesSchema } from '../schemas/node-schema.schema';
+import { TrafficNetworkSchema } from '../schemas/traffic-network.schema';
 
 export enum DiffTypes {
   TrafficNetwork = 'TrafficNetwork',
@@ -10,11 +11,35 @@ export interface DiffKeys {
   nested?: true;
   diffKeys?: DiffKeys[];
 }
-export interface Schema {
-  schema: {
-    name: string;
-  };
+
+export interface Table {
+  name: string;
+  data: TableData[][];
+}
+
+export interface TableData {
+  name: string;
+  expanded: boolean;
+  group: boolean;
+  rows: CompareResult[];
+}
+
+export interface DiffGroup {
+  group: boolean;
+  expanded: boolean;
+  name: string;
   diffKeys: DiffKeys[];
+}
+
+export interface DiffRef extends Omit<DiffGroup, 'diffKeys'> {
+  key: string;
+  array: boolean;
+  schemaRef: Schema;
+}
+
+export interface Schema {
+  name: string;
+  configuration: (DiffGroup | DiffRef)[];
 }
 
 export interface DiffItem<DiffModels> {
@@ -56,9 +81,7 @@ export interface TrafficNetwork {
   routeCount: number;
 }
 export interface TrafficNetworkDiff extends TrafficNetwork {
-  extendedGroups: {
-    nodes: Nodes[];
-  };
+  nodesItems: Nodes[];
 }
 
 export interface Nodes {
@@ -85,6 +108,7 @@ export interface CompareResult {
   name: string;
   same: boolean;
   value: string | number | boolean;
+  values: any[];
 }
 
 export type DiffModelsTypes = TrafficNetwork | Nodes | TrafficNetworkDiff;

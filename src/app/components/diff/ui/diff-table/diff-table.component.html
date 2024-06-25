@@ -1,30 +1,16 @@
-@if(diffResults$ | async; as diff){
-<div class="card">
-  <p-table
-    [value]="diff.results"
-    styleClass="p-datatable-sm p-datatable-gridlines"
-  >
-    <ng-template pTemplate="header" let-columns>
+@if( table$ | async; as data){
+  <p-table [value]="data">
+    <!-- <ng-template pTemplate="header">
       <tr>
-        <th>Keys</th>
-        @for(names of diff.titles; track names){
-        <th>{{ names }}</th>
-        }
+        <th>Key</th>
+        <th *ngFor="let obj of data">{{obj | json}}</th>
       </tr>
-    </ng-template>
-    <ng-template pTemplate="body" let-rowData let-columns="columns">
+    </ng-template> -->
+    <ng-template pTemplate="body" let-group>
       <tr>
-        <td>{{ rowData.name }}</td>
-        <td *ngFor="let row of rowData.values">
-          <div class="flex justify-between">
-            <p [ngClass]="{ 'text-red-500': !row.same }" class="m-0">
-              {{ row.value }}
-            </p>
-            <p-tag [value]="row.same" [severity]="getSeverity(row.same)" />
-          </div>
-        </td>
+        <td>{{group.name}}</td>
+        <td *ngFor="let value of group.values">{{value.value}}</td>
       </tr>
     </ng-template>
   </p-table>
-</div>
 }

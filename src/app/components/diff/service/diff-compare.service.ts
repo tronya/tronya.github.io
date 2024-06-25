@@ -1,9 +1,9 @@
 import { Injectable } from '@angular/core';
+import { MessageService } from 'primeng/api';
 import { map } from 'rxjs';
 import { DiffCore } from './DiffCore';
 import { DiffStoreService } from './diff-store.service';
-import { CompareResult, DiffKeys, DiffModelsTypes } from './models';
-import { MessageService } from 'primeng/api';
+import { CompareResult, DiffKeys, DiffModelsTypes, Table } from './models';
 
 @Injectable()
 export class DiffComparatorService {
@@ -39,13 +39,53 @@ export class DiffComparatorService {
       key,
       same: !compareItem ? true : referanceItem[key] === compareItem[key], // main logic is here
       value: !compareItem ? referanceItem[key] : compareItem[key],
+      values:[]
     };
   }
 
-  private compare(core: DiffCore<DiffModelsTypes>) {
+  private groupHandler(
+    schema: any,
+    referanceItem: any,
+    compareItem?: any
+  ): Table {
+    const configurations = schema.configuration.map((config: any) => {
+      if (config.schemaRef) {
+        if (config.array) {
+          const rows = referanceItem[config.key].map((i: any) => {
+            return this.groupHandler(config.schemaRef, i);
+          });
+          return {
+            name: config.name,
+            expanded: config.expanded,
+            group: config.group,
+            rows,
+          };
+        }
+        return this.groupHandler(config.schemaRef, referanceItem[config.key]);
+      }
+      const rows = config.diffKeys
+        .map((diifKeys: any) =>
+          this.diffItemsComperator(diifKeys, referanceItem, compareItem)
+        )
+        .flat();
+
+      return {
+        name: config.name,
+        expanded: config.expanded,
+        group: config.group,
+        rows,
+      };
+    });
+    return configurations;
+  }
+
+  private compare(core: DiffCore<DiffModelsTypes>): Table {
     const { diffItems, schema } = core;
     if (!diffItems.length) {
-      return [];
+      return {
+        name: 'No data',
+        data: [],
+      };
     }
 
     if (!schema) {
@@ -54,25 +94,27 @@ export class DiffComparatorService {
         summary: 'No Schema Founded!',
         detail: 'No Schema founded for Comparison',
       });
-      return;
+      return {
+        name: 'No data',
+        data: [],
+      };
     }
 
-    const result: CompareResult[][] = [];
+    const result: any = [];
 
-    const referanceItem = diffItems[0] as unknown as any;
-    const referanceItemResult = schema.diffKeys
-      .map((diifKeys) => this.diffItemsComperator(diifKeys, referanceItem))
-      .flat();
-    result.push(referanceItemResult);
+    const referanceDiffIttem = diffItems[0] as unknown as any;
+    const referanceItem = this.groupHandler(schema, referanceDiffIttem);
 
     for (let i = 1; i < diffItems.length; i++) {
-      const compareResults = schema.diffKeys
-        .map((diffKeys) =>
-          this.diffItemsComperator(diffKeys, referanceItem, diffItems[i])
-        )
-        .flat();
-      result.push(compareResults);
+      const item = this.groupHandler(schema, referanceDiffIttem, diffItems[i]);
+      result.push(item);
     }
-    return result;
+
+    const tableData: Table = {
+      name: schema.name,
+      data: [referanceItem, ...result],
+    };
+
+    return tableData;
   }
 }
