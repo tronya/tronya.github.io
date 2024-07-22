@@ -1,0 +1,42 @@
+<div class="flex h-full justify-center max-w-8xl mx-auto px-4 sm:px-6 md:px-8">
+  <div class="container">
+    <div class="card flex flex-col h-full justify-between">
+      <div class="header grow">
+        <!-- <div>
+          @if(data | async; as data){
+          <div class="flex gap-2 flex-wrap">
+            @for( sub of data; track sub+index; let index = $index){
+            <div class="p-4 border-spacing-4 bg-green-500 text-purple-600">
+              {{ sub }}
+            </div>
+            }
+          </div>
+          }
+        </div> -->
+      </div>
+
+      @if(engine | async; as engine){
+      <div
+        class="w-full bg-green-500 text-slate-600 text-9xl font-bold text-center"
+      >
+        @if(engine.item){
+        <p class="p-0 m-0">{{ engine.item }}</p>
+        }@else{
+        <p class="p-0 m-0 text-red-500">No Data available</p>
+        }
+      </div>
+      <div
+        class="w-full bg-red-500 text-white-600 text-9xl font-bold text-center"
+      >
+        <p class="p-0 m-0">{{ engine.interval }}</p>
+      </div>
+      }
+      <div
+        class="w-full bg-red-500 text-white text-7xl font-bold text-center"
+      >
+        <p class="p-0 m-0">{{ second | async }}</p>
+      </div>
+
+    </div>
+  </div>
+</div>

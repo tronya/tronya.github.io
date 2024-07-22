@@ -10,7 +10,7 @@ export interface NodeZ {
 
 @Component({
   standalone: true,
-  imports: [NodeComponent, BrowserModule, CommonModule],
+  imports: [NodeComponent, CommonModule],
   template: '<div><p>Hello</p></div>',
   selector: 'nodes',
 })

@@ -94,14 +94,14 @@ export const TrafficNetworkSchema: Schema = {
         },
       ],
     },
-    {
-      group: true,
-      expanded: true,
-      name: 'Nodes Information',
-      key: 'nodesItems',
-      array: true,
-      schemaRef: NodesSchema,
-    },
+    // {
+    //   group: true,
+    //   expanded: true,
+    //   name: 'Nodes Information',
+    //   key: 'nodesItems',
+    //   array: true,
+    //   schemaRef: NodesSchema,
+    // },
     {
       group: true,
       expanded: true,
