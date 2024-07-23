@@ -32,27 +32,6 @@ export class DiffTableComponent {
     // tap((tap) => console.log(tap))
   );
 
-  // groupDataTable({ name, data }: Table): any[] {
-  //   return data.map((group) => {
-  //     return group.map((item) => {
-  //       const groups: any[] = [];
-  //       item.rows.forEach((row) => {
-  //         groups.push({
-  //           key: row.key,
-  //           name: row.name,
-  //           values: [row],
-  //         });
-  //       });
-  //       return {
-  //         expanded: item.expanded,
-  //         group: item.group,
-  //         name: item.name,
-  //         rows: groups,
-  //       };
-  //     });
-  //   });
-  // }
-
   constructor(private diffComparator: DiffComparatorService) {}
 
   getSeverity(value: boolean) {

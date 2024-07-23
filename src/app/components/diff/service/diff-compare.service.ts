@@ -6,6 +6,7 @@ import { DiffStoreService } from './diff-store.service';
 import {
   CompareResult,
   DiffKey,
+  isDiffRef,
   isNestedDiffKey,
   isPossibleValuesType,
   NestedDiffKey,
@@ -14,7 +15,7 @@ import {
   Table,
   TableData,
 } from './models';
-import { DiffModelsTypes } from './dto';
+import { DiffModelsTypes, Nodes } from './dto';
 
 @Injectable()
 export class DiffComparatorService {
@@ -61,35 +62,60 @@ export class DiffComparatorService {
     };
   }
 
-  private groupHandler(schema: Schema, items: DiffModelsTypes[]): TableData[] {
+  private groupHandler<T>(schema: Schema, items: T[]): TableData[] {
     console.log(schema, items);
     const configurations = schema.configuration.map((config) => {
       const rows: CompareResult[] = [];
 
-      config.diffKeys.forEach((parent) => {
-        // Nested Level Items
-        if (isNestedDiffKey(parent)) {
-          parent.diffKeys.forEach((keys) => {
-            const squachItems = items.map((item) => {
-              const key = parent.key;
-              if (item[key as keyof DiffModelsTypes]) {
-                return item[key as keyof DiffModelsTypes];
-              } else {
-                throw `Can't find key ${parent.key} in object ${item}`;
-              }
+      if (isDiffRef(config)) {
+        if (config.method.type === 'array') {
+          const deffItems: T[][] = items.map(
+            (item) => item[config.key as keyof T]
+          ) as T[][];
+          console.log(config.schemaRef, deffItems);
+          deffItems.forEach((arrayWithItems, i) => {
+            console.log(arrayWithItems, i);
+            arrayWithItems.forEach((itemFromArray) => {
+              const refItem = arrayWithItems.find(
+                (arrayItem) =>
+                  arrayItem[config.method.trackBy as keyof T] ===
+                  itemFromArray[config.method.trackBy as keyof T]
+              );
+              // console.log(element[config.method.trackBy as keyof T]);
+              console.log(refItem);
             });
-            rows.push(this.diffItemsComperator(keys, squachItems));
           });
+          // const data = [deffConfig[0][1] as T, deffConfig[0][2]];
+          // const groupHandler = this.groupHandler(config.schemaRef, data);
+          // rows.push(...groupHandler[0].rows)
+          // console.log(groupHandler);
         }
-        // End Nested Level Items
-        else {
-          rows.push(this.diffItemsComperator(parent, items));
-        }
-      });
+      } else {
+        config.diffKeys.forEach((parent) => {
+          // Nested Level Items
+          if (isNestedDiffKey(parent)) {
+            parent.diffKeys.forEach((keys) => {
+              const squachItems = items.map((item) => {
+                const key = parent.key;
+                if (item[key as keyof T]) {
+                  return item[key as keyof T];
+                } else {
+                  throw `Can't find key ${parent.key} in object ${item}`;
+                }
+              });
+              rows.push(this.diffItemsComperator(keys, squachItems));
+            });
+          }
+          // End Nested Level Items
+          else {
+            rows.push(this.diffItemsComperator(parent, items));
+          }
+        });
+      }
 
       return {
         name: config.name,
-        expanded: config.expanded,
+        collapsed: config.collapsed,
         group: config.group,
         rows,
       };

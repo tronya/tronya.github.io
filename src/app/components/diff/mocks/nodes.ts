@@ -39044,3 +39044,13 @@ export const nodesMock: Nodes[] = [
     identifier: '3637',
   },
 ];
+
+export const nodesMock2 = [
+  ...nodesMock,
+  {
+    ...nodesMock[34],
+    name: 'HEllo',
+    comment: 'This is a test comment',
+    identifier: '36',
+  },
+];

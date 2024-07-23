@@ -6,7 +6,7 @@ export const NodesSchema: Schema = {
   configuration: [
     {
       group: true,
-      expanded: true,
+      collapsed: true,
       name: 'Generic Information',
       diffKeys: [
         {

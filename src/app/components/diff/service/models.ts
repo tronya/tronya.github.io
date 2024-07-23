@@ -28,28 +28,38 @@ export interface Table {
 
 export interface TableData {
   name: string;
-  expanded: boolean;
+  collapsed: boolean;
   group: boolean;
   rows: CompareResult[];
 }
 
 export interface DiffGroup {
   group: boolean;
-  expanded: boolean;
+  collapsed: boolean;
   name: string;
   diffKeys: (DiffKey | NestedDiffKey)[];
 }
 
 export interface DiffRef extends Omit<DiffGroup, 'diffKeys'> {
-  key: string;
-  array: boolean;
+  key: string; // refferance to key in object
+  method: {
+    type: 'array';
+    trackBy: string;
+  }; // flag to explain if it would be an array of items
   schemaRef: Schema;
+}
+export function isDiffRef(value: any): value is DiffRef {
+  return (
+    value.hasOwnProperty('schemaRef') &&
+    value.hasOwnProperty('key') &&
+    value.hasOwnProperty('method')
+  );
 }
 
 export interface Schema {
   name: string;
   headerKey: string;
-  configuration: DiffGroup[];
+  configuration: (DiffGroup | DiffRef)[];
 }
 
 export interface DiffItem<DiffModels> {

@@ -3,11 +3,11 @@ import { NodesSchema } from './node-schema.schema';
 
 export const TrafficNetworkSchema: Schema = {
   name: 'Traffic Network',
-  headerKey:'name',
+  headerKey: 'name',
   configuration: [
     {
       group: true,
-      expanded: true,
+      collapsed: true,
       name: 'Generic Information',
       diffKeys: [
         {
@@ -95,19 +95,22 @@ export const TrafficNetworkSchema: Schema = {
         },
       ],
     },
-    // {
-    //   group: true,
-    //   expanded: true,
-    //   name: 'Nodes Information',
-    //   key: 'nodesItems',
-    //   array: true,
-    //   schemaRef: NodesSchema,
-    // },
     {
       group: true,
-      expanded: true,
+      collapsed: true,
       name: 'Link Information',
       diffKeys: [],
+    },
+    {
+      group: true,
+      collapsed: true,
+      name: 'Nodes Information',
+      key: 'nodesItems',
+      method: {
+        type: 'array',
+        trackBy: 'guid',
+      },
+      schemaRef: NodesSchema,
     },
   ],
 };

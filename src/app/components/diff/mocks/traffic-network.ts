@@ -1,5 +1,5 @@
 import { TrafficNetwork } from '../service/dto';
-import { nodesMock } from './nodes';
+import { nodesMock, nodesMock2 } from './nodes';
 
 export const trafficNetwork: TrafficNetwork = {
   guid: '28f392e4-ddde-4d68-90a9-9ffce7163989',
@@ -24,7 +24,7 @@ export const trafficNetwork: TrafficNetwork = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
-  // nodesItems: nodesMock,
+  nodesItems: nodesMock,
 };
 
 export const trafficNetwork2 = {
@@ -50,6 +50,7 @@ export const trafficNetwork2 = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
+  nodesItems: nodesMock2,
 };
 
 export const trafficNetwork3 = {

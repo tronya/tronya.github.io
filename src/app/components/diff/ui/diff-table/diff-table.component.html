@@ -16,7 +16,11 @@
   <ng-template pTemplate="body" let-group>
     <tr *ngIf="group.group">
       <td [attr.colspan]="table.itemsCount">
-        <p-panel [header]="group.name" [toggleable]="true">
+        <p-panel
+          [header]="group.name"
+          [toggleable]="true"
+          [collapsed]="group.collapsed"
+        >
           <ng-container *ngFor="let row of group.rows">
             <p-table
               [value]="row.values"

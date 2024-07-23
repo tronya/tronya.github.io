@@ -21,6 +21,8 @@ export interface TrafficNetwork {
   sectionCount: number;
   subnetworkCount: number;
   routeCount: number;
+  //
+  nodesItems?: Nodes[];
 }
 
 export interface Nodes {
