@@ -1,4 +1,4 @@
-import { DiffItem, DiffModelsTypes, DiffSchemaTypes, Schema } from './models';
+import { DiffItem, DiffSchemaTypes, Schema } from './models';
 
 export class DiffCore<T> {
   diffItems: T[];

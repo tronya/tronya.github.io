@@ -1,6 +1,5 @@
 import { Component } from '@angular/core';
 import { DiffStoreService } from './service/diff-store.service';
-import { DiffModelsTypes, DiffTypes, TrafficNetwork } from './service/models';
 
 import {
   trafficNetwork,
@@ -15,6 +14,8 @@ import { MessageService } from 'primeng/api';
 import { RippleModule } from 'primeng/ripple';
 import { ToastModule } from 'primeng/toast';
 import { CommonModule } from '@angular/common';
+import { DiffModelsTypes } from './service/dto';
+import { DiffTypes } from './service/models';
 
 @Component({
   standalone: true,
@@ -43,6 +44,7 @@ export class DiffComponent {
 
   constructor(private diffStoreService: DiffStoreService) {
     this.addDiffItem(this.tn1, DiffTypes.TrafficNetwork);
+    this.addDiffItem(this.tn2, DiffTypes.TrafficNetwork);
   }
 
   addDiffItem(item: DiffModelsTypes, type: DiffTypes) {

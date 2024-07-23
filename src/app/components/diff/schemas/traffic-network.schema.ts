@@ -3,6 +3,7 @@ import { NodesSchema } from './node-schema.schema';
 
 export const TrafficNetworkSchema: Schema = {
   name: 'Traffic Network',
+  headerKey:'name',
   configuration: [
     {
       group: true,

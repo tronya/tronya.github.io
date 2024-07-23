@@ -1,9 +1,20 @@
 import { Injectable } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import { map } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { DiffCore } from './DiffCore';
 import { DiffStoreService } from './diff-store.service';
-import { CompareResult, DiffKeys, DiffModelsTypes, Table } from './models';
+import {
+  CompareResult,
+  DiffKey,
+  isNestedDiffKey,
+  isPossibleValuesType,
+  NestedDiffKey,
+  PossibleValuesTypes,
+  Schema,
+  Table,
+  TableData,
+} from './models';
+import { DiffModelsTypes } from './dto';
 
 @Injectable()
 export class DiffComparatorService {
@@ -15,59 +26,66 @@ export class DiffComparatorService {
     private messageService: MessageService
   ) {}
 
-  private diffItemsComperator(
-    { key, name, nested, diffKeys }: DiffKeys,
-    referanceItem: any,
-    compareItem?: any
-  ): CompareResult | CompareResult[] {
-    if (nested) {
-      return (
-        diffKeys
-          ?.map((diffKeys) => {
-            const compare = compareItem ? compareItem[key] : compareItem;
-            return this.diffItemsComperator(
-              diffKeys,
-              referanceItem[key],
-              compare
-            );
-          })
-          .flat() || []
-      );
-    }
+  private diffItemsComperator<T>(
+    diffKey: DiffKey | NestedDiffKey,
+    refElements: T[]
+  ): CompareResult {
+    const nested = isNestedDiffKey(diffKey);
+    console.log(nested);
+
+    const { key, name } = diffKey;
+
+    const values: PossibleValuesTypes[] = refElements.map((element) => {
+      if (element?.hasOwnProperty(key)) {
+        const value = element[key as keyof T];
+        if (isPossibleValuesType(value)) {
+          return value as PossibleValuesTypes;
+        } else {
+          console.error('we cant handle this type yet', value);
+        }
+      }
+      return undefined;
+    });
+
+    const equalAll = values.every((v) => v == values[0]);
+    const equalityValues = values.map((value) => ({
+      value,
+      equal: value === values[0],
+    }));
+
     return {
       name,
       key,
-      same: !compareItem ? true : referanceItem[key] === compareItem[key], // main logic is here
-      value: !compareItem ? referanceItem[key] : compareItem[key],
-      values:[]
+      equalAll,
+      values: equalityValues,
     };
   }
 
-  private groupHandler(
-    schema: any,
-    referanceItem: any,
-    compareItem?: any
-  ): Table {
-    const configurations = schema.configuration.map((config: any) => {
-      if (config.schemaRef) {
-        if (config.array) {
-          const rows = referanceItem[config.key].map((i: any) => {
-            return this.groupHandler(config.schemaRef, i);
+  private groupHandler(schema: Schema, items: DiffModelsTypes[]): TableData[] {
+    console.log(schema, items);
+    const configurations = schema.configuration.map((config) => {
+      const rows: CompareResult[] = [];
+
+      config.diffKeys.forEach((parent) => {
+        // Nested Level Items
+        if (isNestedDiffKey(parent)) {
+          parent.diffKeys.forEach((keys) => {
+            const squachItems = items.map((item) => {
+              const key = parent.key;
+              if (item[key as keyof DiffModelsTypes]) {
+                return item[key as keyof DiffModelsTypes];
+              } else {
+                throw `Can't find key ${parent.key} in object ${item}`;
+              }
+            });
+            rows.push(this.diffItemsComperator(keys, squachItems));
           });
-          return {
-            name: config.name,
-            expanded: config.expanded,
-            group: config.group,
-            rows,
-          };
         }
-        return this.groupHandler(config.schemaRef, referanceItem[config.key]);
-      }
-      const rows = config.diffKeys
-        .map((diifKeys: any) =>
-          this.diffItemsComperator(diifKeys, referanceItem, compareItem)
-        )
-        .flat();
+        // End Nested Level Items
+        else {
+          rows.push(this.diffItemsComperator(parent, items));
+        }
+      });
 
       return {
         name: config.name,
@@ -84,6 +102,8 @@ export class DiffComparatorService {
     if (!diffItems.length) {
       return {
         name: 'No data',
+        headerKeys: [],
+        itemsCount: 0,
         data: [],
       };
     }
@@ -96,23 +116,23 @@ export class DiffComparatorService {
       });
       return {
         name: 'No data',
+        headerKeys: [],
+        itemsCount: 0,
         data: [],
       };
     }
 
-    const result: any = [];
+    const data = this.groupHandler(schema, diffItems);
 
-    const referanceDiffIttem = diffItems[0] as unknown as any;
-    const referanceItem = this.groupHandler(schema, referanceDiffIttem);
-
-    for (let i = 1; i < diffItems.length; i++) {
-      const item = this.groupHandler(schema, referanceDiffIttem, diffItems[i]);
-      result.push(item);
-    }
+    const headerKeys = diffItems.map(
+      (item) => item[schema.headerKey as keyof DiffModelsTypes] || 'Not Defined'
+    );
 
     const tableData: Table = {
       name: schema.name,
-      data: [referanceItem, ...result],
+      headerKeys,
+      itemsCount: headerKeys.length,
+      data,
     };
 
     return tableData;

@@ -1,7 +1,8 @@
-import { Schema } from "../service/models";
+import { Schema } from '../service/models';
 
 export const NodesSchema: Schema = {
   name: 'Nodes Schema',
+  headerKey: 'name',
   configuration: [
     {
       group: true,

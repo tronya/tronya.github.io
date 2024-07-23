@@ -1,4 +1,4 @@
-import { Nodes } from '../service/models';
+import { Nodes } from '../service/dto';
 
 export const nodesMock: Nodes[] = [
   {

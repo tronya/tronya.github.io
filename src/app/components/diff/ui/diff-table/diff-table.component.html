@@ -1,16 +1,57 @@
-@if( table$ | async; as data){
-  <p-table [value]="data">
-    <!-- <ng-template pTemplate="header">
-      <tr>
-        <th>Key</th>
-        <th *ngFor="let obj of data">{{obj | json}}</th>
-      </tr>
-    </ng-template> -->
-    <ng-template pTemplate="body" let-group>
-      <tr>
-        <td>{{group.name}}</td>
-        <td *ngFor="let value of group.values">{{value.value}}</td>
-      </tr>
-    </ng-template>
-  </p-table>
+@if(table$ | async; as table){
+<p-table
+  [value]="table.data"
+  [styleClass]="'p-datatable-sm'"
+  [scrollable]="true"
+>
+  <ng-template pTemplate="header">
+    <tr pFrozenColumn>
+      @for(header of table.headerKeys; track header){
+      <th class="text-center">
+        <h3 class="m-0 p-0 uppercase">{{ header }}</h3>
+      </th>
+      }
+    </tr>
+  </ng-template>
+  <ng-template pTemplate="body" let-group>
+    <tr *ngIf="group.group">
+      <td [attr.colspan]="table.itemsCount">
+        <p-panel [header]="group.name" [toggleable]="true">
+          <ng-container *ngFor="let row of group.rows">
+            <p-table
+              [value]="row.values"
+              styleClass="p-datatable-sm p-datatable-gridlines"
+            >
+              <ng-template pTemplate="header">
+                <tr>
+                  <th [attr.colspan]="table.itemsCount">
+                    <div
+                      class="text-center flex gap-2 items-center justify-center"
+                    >
+                      <span>{{ row.name }}</span>
+                      <span
+                        class="rounded-full w-2 h-2 flex"
+                        [ngClass]="{
+                          'bg-green-400': row.equalAll,
+                          'bg-yellow-400': !row.equalAll
+                        }"
+                      ></span>
+                    </div>
+                  </th>
+                </tr>
+              </ng-template>
+              <ng-template pTemplate="body" let-value>
+                <td class="p-4">
+                  <div class="text-center">
+                    {{ value.value }}
+                  </div>
+                </td>
+              </ng-template>
+            </p-table>
+          </ng-container>
+        </p-panel>
+      </td>
+    </tr>
+  </ng-template>
+</p-table>
 }

@@ -5,16 +5,25 @@ export enum DiffTypes {
   TrafficNetwork = 'TrafficNetwork',
   Nodes = 'Nodes',
 }
-export interface DiffKeys {
+export interface DiffKey {
   name: string;
   key: string;
-  nested?: true;
-  diffKeys?: DiffKeys[];
+}
+
+export interface NestedDiffKey extends DiffKey {
+  nested: true;
+  diffKeys: DiffKey[];
+}
+
+export function isNestedDiffKey(value: any): value is NestedDiffKey {
+  return value.hasOwnProperty('nested');
 }
 
 export interface Table {
   name: string;
-  data: TableData[][];
+  headerKeys: string[];
+  itemsCount: number;
+  data: TableData[];
 }
 
 export interface TableData {
@@ -28,7 +37,7 @@ export interface DiffGroup {
   group: boolean;
   expanded: boolean;
   name: string;
-  diffKeys: DiffKeys[];
+  diffKeys: (DiffKey | NestedDiffKey)[];
 }
 
 export interface DiffRef extends Omit<DiffGroup, 'diffKeys'> {
@@ -39,7 +48,8 @@ export interface DiffRef extends Omit<DiffGroup, 'diffKeys'> {
 
 export interface Schema {
   name: string;
-  configuration: (DiffGroup | DiffRef)[];
+  headerKey: string;
+  configuration: DiffGroup[];
 }
 
 export interface DiffItem<DiffModels> {
@@ -56,59 +66,22 @@ export type DiffProp = {
   [key: string]: any;
 };
 
-export interface TrafficNetwork {
-  guid: string;
-  tenantId: string;
-  name: string;
-  description: string;
-  geoArea: null;
-  rightHandTraffic: boolean;
-  displaySpeedUnit: number;
-  displayLengthUnit: number;
-  defaultMaxSpeed: number;
-  nodes: number;
-  links: number;
-  nodeCount: number;
-  nodeClusterCount: number;
-  linkCount: number;
-  identifier: string;
-  externalSourceCount: {
-    WINTICS: number;
-    IPER: number;
-  };
-  sectionCount: number;
-  subnetworkCount: number;
-  routeCount: number;
+export type PossibleValuesTypes = string | number | boolean | undefined | Date;
+export function isPossibleValuesType(value: any): value is PossibleValuesTypes {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    value instanceof Date ||
+    value === undefined
+  );
 }
-export interface TrafficNetworkDiff extends TrafficNetwork {
-  nodesItems: Nodes[];
-}
-
-export interface Nodes {
-  guid: string;
-  network: string;
-  location: {
-    projection: string;
-    lon: number;
-    lat: number;
-  };
-  type: number;
-  name: string;
-  comment: string | null;
-  nodeTmsProperties: {
-    tlcId: string | null;
-    tlcNodeId: string | null;
-    tlcSubNodeId: string | null;
-  };
-  identifier: string;
-}
-
 export interface CompareResult {
   key: string;
   name: string;
-  same: boolean;
-  value: string | number | boolean;
-  values: any[];
+  equalAll: boolean;
+  values: {
+    value: PossibleValuesTypes;
+    equal: boolean;
+  }[];
 }
-
-export type DiffModelsTypes = TrafficNetwork | Nodes | TrafficNetworkDiff;

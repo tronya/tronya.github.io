@@ -1,7 +1,7 @@
-import { TrafficNetwork, TrafficNetworkDiff } from '../service/models';
+import { TrafficNetwork } from '../service/dto';
 import { nodesMock } from './nodes';
 
-export const trafficNetwork: TrafficNetworkDiff = {
+export const trafficNetwork: TrafficNetwork = {
   guid: '28f392e4-ddde-4d68-90a9-9ffce7163989',
   tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
   name: 'par_test1',
@@ -24,7 +24,7 @@ export const trafficNetwork: TrafficNetworkDiff = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
-  nodesItems: nodesMock,
+  // nodesItems: nodesMock,
 };
 
 export const trafficNetwork2 = {
