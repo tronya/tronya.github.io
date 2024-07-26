@@ -1,12 +1,17 @@
 import { Injectable } from '@angular/core';
 import { MessageService } from 'primeng/api';
-import { map } from 'rxjs/operators';
+
+import { map } from 'rxjs';
+import { ConfigurationFactory } from './ConfigurationFactory';
 import { DiffCore } from './DiffCore';
 import { DiffStoreService } from './diff-store.service';
+import { DiffModelsTypes } from './dto';
 import {
   CompareResult,
+  Configuration,
+  ConfigurationGroup,
   DiffKey,
-  isDiffRef,
+  isConfigurationReferance,
   isNestedDiffKey,
   isPossibleValuesType,
   NestedDiffKey,
@@ -14,42 +19,52 @@ import {
   Schema,
   Table,
   TableData,
+  TableParentConfig,
 } from './models';
-import { DiffModelsTypes, Nodes } from './dto';
+import { isEmpty } from 'lodash';
 
 @Injectable()
 export class DiffComparatorService {
-  diffCore = this.diffStore.diffItems.pipe(map((items) => new DiffCore(items)));
-  diffResult = this.diffCore.pipe(map((core) => this.compare(core)));
+  diffCore = this.diffStore.compareItems.pipe(
+    map((items) => new DiffCore(items))
+  );
+  diffResult = this.diffCore.pipe(map((core) => this.generateRootConfig(core)));
 
   constructor(
     private diffStore: DiffStoreService,
     private messageService: MessageService
   ) {}
 
-  private diffItemsComperator<T>(
+  public diffItemsComperator<T>(
     diffKey: DiffKey | NestedDiffKey,
     refElements: T[]
   ): CompareResult {
-    const nested = isNestedDiffKey(diffKey);
-    console.log(nested);
-
     const { key, name } = diffKey;
 
     const values: PossibleValuesTypes[] = refElements.map((element) => {
+      if( isEmpty(element)){
+        return undefined;
+      };
       if (element?.hasOwnProperty(key)) {
         const value = element[key as keyof T];
+
         if (isPossibleValuesType(value)) {
-          return value as PossibleValuesTypes;
+          if (typeof value === 'string' && value.length === 0) {
+            return '-';
+          }
+          return value;
+        } else if (value == null) {
+          return 'null';
         } else {
           console.error('we cant handle this type yet', value);
         }
       }
+      console.warn(`we can not find this key ${key}`);
       return undefined;
     });
 
     const equalAll = values.every((v) => v == values[0]);
-    const equalityValues = values.map((value) => ({
+    const compareValues = values.map((value) => ({
       value,
       equal: value === values[0],
     }));
@@ -57,80 +72,68 @@ export class DiffComparatorService {
     return {
       name,
       key,
-      equalAll,
-      values: equalityValues,
+      equalValues: equalAll,
+      values: compareValues,
     };
   }
 
-  private groupHandler<T>(schema: Schema, items: T[]): TableData[] {
-    console.log(schema, items);
-    const configurations = schema.configuration.map((config) => {
-      const rows: CompareResult[] = [];
-
-      if (isDiffRef(config)) {
-        if (config.method.type === 'array') {
-          const deffItems: T[][] = items.map(
-            (item) => item[config.key as keyof T]
-          ) as T[][];
-          console.log(config.schemaRef, deffItems);
-          deffItems.forEach((arrayWithItems, i) => {
-            console.log(arrayWithItems, i);
-            arrayWithItems.forEach((itemFromArray) => {
-              const refItem = arrayWithItems.find(
-                (arrayItem) =>
-                  arrayItem[config.method.trackBy as keyof T] ===
-                  itemFromArray[config.method.trackBy as keyof T]
-              );
-              // console.log(element[config.method.trackBy as keyof T]);
-              console.log(refItem);
-            });
-          });
-          // const data = [deffConfig[0][1] as T, deffConfig[0][2]];
-          // const groupHandler = this.groupHandler(config.schemaRef, data);
-          // rows.push(...groupHandler[0].rows)
-          // console.log(groupHandler);
-        }
-      } else {
-        config.diffKeys.forEach((parent) => {
-          // Nested Level Items
-          if (isNestedDiffKey(parent)) {
-            parent.diffKeys.forEach((keys) => {
-              const squachItems = items.map((item) => {
-                const key = parent.key;
-                if (item[key as keyof T]) {
-                  return item[key as keyof T];
-                } else {
-                  throw `Can't find key ${parent.key} in object ${item}`;
-                }
-              });
-              rows.push(this.diffItemsComperator(keys, squachItems));
-            });
-          }
-          // End Nested Level Items
-          else {
-            rows.push(this.diffItemsComperator(parent, items));
-          }
-        });
-      }
-
-      return {
-        name: config.name,
-        collapsed: config.collapsed,
-        group: config.group,
-        rows,
-      };
+  private getParrentTables<T>(schema: Schema, items: T[]) {
+    const configurations: TableParentConfig<T>[] = [];
+    schema.configuration.forEach((configuration) => {
+      const config = new ConfigurationFactory<
+        Configuration,
+        T
+      >().getConfiguration(configuration, items);
+      if (!config) return;
+      configurations.push(config);
     });
+
     return configurations;
   }
 
-  private compare(core: DiffCore<DiffModelsTypes>): Table {
+  // if (config.preload) {
+  //   if (config.method.type === 'array') {
+  //     const diffItems: T[][] = items.map(
+  //       (item) => item[config.key as keyof T] || [] // empty array in case of no value
+  //     ) as T[][];
+  //     // console.log(config.schemaRef, diffItems);
+  //     const allPossibleIds = lmap(
+  //       flatten(diffItems),
+  //       config.method.trackBy
+  //     );
+  //     const uniqByKey = uniq(allPossibleIds);
+  //     const combinedByKey = uniqByKey.map((key) => {
+  //       return diffItems.map((diffItem) => {
+  //         return (
+  //           diffItem?.find(
+  //             (di) => di[config.method.trackBy as keyof T] === key
+  //           ) || ({} as T)
+  //         );
+  //       });
+  //     });
+  //     // adding to diff
+  //     const diff = combinedByKey.map((combEl, index) => {
+  //       return this.groupHandler(config.schemaRef, combEl)[0];
+  //     });
+  //     return {
+  //       name: config.name,
+  //       collapsed: config.collapsed,
+  //       group: config.group,
+  //       rows: diff,
+  //     };
+  //   }
+  // }
+
+  private generateRootConfig(
+    core: DiffCore<DiffModelsTypes>
+  ): Table<DiffModelsTypes> {
     const { diffItems, schema } = core;
     if (!diffItems.length) {
       return {
         name: 'No data',
         headerKeys: [],
         itemsCount: 0,
-        data: [],
+        parentConfig: [],
       };
     }
 
@@ -144,23 +147,24 @@ export class DiffComparatorService {
         name: 'No data',
         headerKeys: [],
         itemsCount: 0,
-        data: [],
+        parentConfig: [],
       };
     }
 
-    const data = this.groupHandler(schema, diffItems);
+    const parentConfig = this.getParrentTables<DiffModelsTypes>(
+      schema,
+      diffItems
+    );
 
     const headerKeys = diffItems.map(
       (item) => item[schema.headerKey as keyof DiffModelsTypes] || 'Not Defined'
     );
 
-    const tableData: Table = {
+    return {
       name: schema.name,
       headerKeys,
       itemsCount: headerKeys.length,
-      data,
+      parentConfig,
     };
-
-    return tableData;
   }
 }

@@ -4,44 +4,69 @@
     <div class="flex justify-center">
       <div class="container">
         <div class="card flex flex-wrap gap-3 justify-content-center">
-          <p-button
-            label="TN1"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(tn1, types.TrafficNetwork)"
-          />
-          <p-button
-            label="TN2"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(tn2, types.TrafficNetwork)"
-          />
-          <p-button
-            label="TN3"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(tn3, types.TrafficNetwork)"
-          />
-        </div>
-        <div class="card flex flex-wrap gap-3 justify-content-center">
-          <p-button
-            label="Node 1"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(node1, types.Nodes)"
-          />
-          <p-button
-            label="Node 2"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(node2, types.Nodes)"
-          />
-          <p-button
-            label="Node 3"
-            size="small"
-            [rounded]="true"
-            (click)="addDiffItem(node3, types.Nodes)"
-          />
+          <div>
+            <p-button
+              label="TN1"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(tn1, types.TrafficNetwork)"
+            />
+            <p-button
+              label="TN2"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(tn2, types.TrafficNetwork)"
+            />
+            <p-button
+              label="TN3"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(tn3, types.TrafficNetwork)"
+            />
+          </div>
+          <div>
+            <p-button
+              label="Node 1"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(node1, types.Node)"
+            />
+            <p-button
+              label="Node 2"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(node2, types.Node)"
+            />
+            <p-button
+              label="Node 3"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(node3, types.Node)"
+            />
+          </div>
+          <div>
+            <p-button
+              label="Link 1"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(links1, types.Link)"
+            />
+            <p-button
+              label="Links 2"
+              size="small"
+              [rounded]="true"
+              (click)="addDiffItem(links2, types.Link)"
+            />
+          </div>
+          <div>
+            <p-button
+              severity="danger"
+              label="Clear"
+              size="small"
+              [rounded]="true"
+              (click)="clear()"
+            />
+          </div>
         </div>
 
         <diff-bar></diff-bar>

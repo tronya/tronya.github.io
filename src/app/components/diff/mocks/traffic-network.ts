@@ -1,7 +1,8 @@
-import { TrafficNetwork } from '../service/dto';
+import { TrafficNetworkDTO } from '../service/dto';
+import { linksMock } from './links';
 import { nodesMock, nodesMock2 } from './nodes';
 
-export const trafficNetwork: TrafficNetwork = {
+export const trafficNetwork: TrafficNetworkDTO = {
   guid: '28f392e4-ddde-4d68-90a9-9ffce7163989',
   tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
   name: 'par_test1',
@@ -24,10 +25,11 @@ export const trafficNetwork: TrafficNetwork = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
-  nodesItems: nodesMock,
+  nodesDTO: nodesMock,
+  linksDTO: linksMock,
 };
 
-export const trafficNetwork2 = {
+export const trafficNetwork2: TrafficNetworkDTO = {
   guid: '28f392e4-ddde-4d68-90a9-sdffsd',
   tenantId: 'a5dddb89-3b9d-4ae5-8340-888f2d9e2dc8',
   name: 'par_test12',
@@ -44,13 +46,34 @@ export const trafficNetwork2 = {
   nodeClusterCount: 197,
   linkCount: 123123,
   externalSourceCount: {
-    WINTICS: 0,
-    IPER: 357,
+    WINTICS: 2,
+    IPER: 353,
   },
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 269,
-  nodesItems: nodesMock2,
+  nodesDTO: nodesMock2,
+  linksDTO: [
+    linksMock[0],
+    linksMock[2],
+    {
+      ...linksMock[3],
+      end: {
+        name: linksMock[3].end.name,
+        node: 'Whooo who are you',
+      },
+    },
+    linksMock[4],
+    linksMock[5],
+    linksMock[6],
+    linksMock[7],
+    linksMock[8],
+    linksMock[9],
+    linksMock[10],
+    linksMock[11],
+    linksMock[12],
+    linksMock[13],
+  ],
 };
 
 export const trafficNetwork3 = {
@@ -76,4 +99,5 @@ export const trafficNetwork3 = {
   sectionCount: 0,
   subnetworkCount: 26,
   routeCount: 4324,
+  linksDTO: linksMock,
 };

@@ -1,12 +1,12 @@
 import { Schema } from '../service/models';
-import { NodesSchema } from './node-schema.schema';
+import { LinksSchema } from './links.schema';
+import { NodesSchema } from './node.schema';
 
 export const TrafficNetworkSchema: Schema = {
   name: 'Traffic Network',
   headerKey: 'name',
   configuration: [
     {
-      group: true,
       collapsed: true,
       name: 'Generic Information',
       diffKeys: [
@@ -89,28 +89,43 @@ export const TrafficNetworkSchema: Schema = {
           name: 'Route Count',
           key: 'routeCount',
         },
-        {
-          key: 'extendedGroups',
-          name: 'ExtendedGroups',
-        },
       ],
     },
     {
-      group: true,
-      collapsed: true,
+      collapsed: false,
       name: 'Link Information',
-      diffKeys: [],
+      preload: true,
+      key: 'linksDTO',
+      method: {
+        type: 'array',
+        trackBy: 'guid',
+      },
+      schemaRef: LinksSchema,
     },
     {
-      group: true,
       collapsed: true,
       name: 'Nodes Information',
+      preload: false,
       key: 'nodesItems',
       method: {
         type: 'array',
         trackBy: 'guid',
       },
       schemaRef: NodesSchema,
+    },
+    {
+      name: 'First level items',
+      collapsed: false,
+      diffKeys: [
+        {
+          name: 'Nodes Count',
+          key: 'nodes',
+        },
+        {
+          name: 'Link Count',
+          key: 'linkCount',
+        },
+      ],
     },
   ],
 };

@@ -1,4 +1,4 @@
-export interface TrafficNetwork {
+export interface TrafficNetworkDTO {
   guid: string;
   tenantId: string;
   name: string;
@@ -22,10 +22,11 @@ export interface TrafficNetwork {
   subnetworkCount: number;
   routeCount: number;
   //
-  nodesItems?: Nodes[];
+  nodesDTO?: NodesDTO[];
+  linksDTO?: LinkDTO[];
 }
 
-export interface Nodes {
+export interface NodesDTO {
   guid: string;
   network: string;
   location: {
@@ -44,4 +45,44 @@ export interface Nodes {
   identifier: string;
 }
 
-export type DiffModelsTypes = TrafficNetwork | Nodes;
+interface ProjectProjection {
+  projection: string;
+  lon: number;
+  lat: number;
+}
+
+interface TMSProperties {
+  referenceLinks: [];
+  laneCount: number | null;
+  coefficient: number | null;
+  maxSpeed: number | null;
+  length: number | null;
+  tlcDetectors: any[];
+}
+export interface LinkDTO {
+  guid: string;
+  network: string;
+  name: string;
+  start: {
+    name: string;
+    node: string;
+  };
+  end: {
+    name: string;
+    node: string;
+  };
+  tmsProperties: TMSProperties;
+  geometry: {
+    projection: string;
+    points: ProjectProjection[];
+  };
+  blocked: boolean;
+  category: number;
+  additionalType: null;
+  identifier: string;
+  externalSource: string;
+  stateForMap: string;
+  timestamp: string;
+}
+
+export type DiffModelsTypes = TrafficNetworkDTO | NodesDTO | LinkDTO;

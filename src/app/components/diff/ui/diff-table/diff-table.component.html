@@ -1,7 +1,9 @@
 @if(table$ | async; as table){
 <p-table
-  [value]="table.data"
-  [styleClass]="'p-datatable-sm'"
+  [value]="table.parentConfig"
+  responsiveLayout="fixed"
+  styleClass="p-datatable-sm p-datatable-gridlines"
+  class="table-fixed"
   [scrollable]="true"
 >
   <ng-template pTemplate="header">
@@ -13,47 +15,17 @@
       }
     </tr>
   </ng-template>
-  <ng-template pTemplate="body" let-group>
-    <tr *ngIf="group.group">
+  <ng-template pTemplate="body" let-parentConfig>
+    <tr>
       <td [attr.colspan]="table.itemsCount">
-        <p-panel
-          [header]="group.name"
-          [toggleable]="true"
-          [collapsed]="group.collapsed"
-        >
-          <ng-container *ngFor="let row of group.rows">
-            <p-table
-              [value]="row.values"
-              styleClass="p-datatable-sm p-datatable-gridlines"
-            >
-              <ng-template pTemplate="header">
-                <tr>
-                  <th [attr.colspan]="table.itemsCount">
-                    <div
-                      class="text-center flex gap-2 items-center justify-center"
-                    >
-                      <span>{{ row.name }}</span>
-                      <span
-                        class="rounded-full w-2 h-2 flex"
-                        [ngClass]="{
-                          'bg-green-400': row.equalAll,
-                          'bg-yellow-400': !row.equalAll
-                        }"
-                      ></span>
-                    </div>
-                  </th>
-                </tr>
-              </ng-template>
-              <ng-template pTemplate="body" let-value>
-                <td class="p-4">
-                  <div class="text-center">
-                    {{ value.value }}
-                  </div>
-                </td>
-              </ng-template>
-            </p-table>
-          </ng-container>
-        </p-panel>
+        @switch(parentConfig.type){
+          @case (configTypes.ConfigGroup) {
+        <diff-section-group [section]="parentConfig"></diff-section-group>
+        } @case (configTypes.ConfigReferance) {
+        <diff-section-referance
+          [section]="parentConfig"
+        ></diff-section-referance>
+        } }
       </td>
     </tr>
   </ng-template>

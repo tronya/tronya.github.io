@@ -1,6 +1,6 @@
-import { Nodes } from '../service/dto';
+import { NodesDTO } from '../service/dto';
 
-export const nodesMock: Nodes[] = [
+export const nodesMock: NodesDTO[] = [
   {
     guid: '5e6b7ebe-9b6b-4c84-90e4-46e9f21e717f',
     network: '28f392e4-ddde-4d68-90a9-9ffce7163989',

@@ -6,11 +6,11 @@ import { DiffModelsTypes } from './dto';
 
 @Injectable({ providedIn: 'root' })
 export class DiffStoreService {
-  public diffItems: BehaviorSubject<DiffItem<DiffModelsTypes>[]> =
+  public compareItems: BehaviorSubject<DiffItem<DiffModelsTypes>[]> =
     new BehaviorSubject<DiffItem<DiffModelsTypes>[]>([]);
 
   addDiffItem(item: DiffModelsTypes, type: DiffTypes) {
-    const existedItems = this.diffItems.getValue();
+    const existedItems = this.compareItems.getValue();
 
     const findIfExisted = existedItems.find(
       (existed) => existed.item.guid === item.guid && existed.type === type
@@ -22,11 +22,14 @@ export class DiffStoreService {
         (existedItem) =>
           existedItem.item.guid === item.guid && existedItem.type === type
       );
-      this.diffItems.next(existedItems);
+      this.compareItems.next(existedItems);
       return;
     }
 
     existedItems.push({ item, type });
-    this.diffItems.next(existedItems);
+    this.compareItems.next(existedItems);
+  }
+  clear() {
+    this.compareItems.next([]);
   }
 }

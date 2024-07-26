@@ -1,0 +1,53 @@
+@if(loading()){
+<p-progressBar mode="indeterminate" [style]="{ height: '6px' }" />
+} @if(tableData | async; as data){
+<p-panel [toggleable]="collapsed()" [collapsed]="collapsed()">
+  <ng-template pTemplate="header">
+    <div class="flex gap-4 w-full justify-between">
+      <p class="flex-grow">{{ title() }}</p>
+      <div class="flex gap-2 items-center" *ngIf="data.notEqualKeys">
+        <span>{{ data.notEqualKeys }}</span>
+        <span class="rounded-full w-2 h-2 flex bg-yellow-400"></span>
+      </div>
+      <p-toggleButton
+        (onChange)="stateChange($event)"
+        onLabel="On"
+        offLabel="Off"
+      />
+    </div>
+  </ng-template>
+  <ng-template pTemplate="body">
+    <ng-container *ngFor="let row of data.rows">
+      <p-table
+        [value]="row.values"
+        styleClass="p-datatable-sm p-datatable-gridlines"
+        class="table-fixed"
+      >
+        <ng-template pTemplate="header">
+          <tr>
+            <th [attr.colspan]="data.itemsCount">
+              <div class="text-center flex gap-2 items-center justify-center">
+                <span>{{ row.name }}</span>
+                <span
+                  class="rounded-full w-2 h-2 flex"
+                  [ngClass]="{
+                    'bg-green-400': row.equalValues,
+                    'bg-yellow-400': !row.equalValues
+                  }"
+                ></span>
+              </div>
+            </th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-value>
+          <td class="p-4">
+            <div class="text-center">
+              {{ value.value }}
+            </div>
+          </td>
+        </ng-template>
+      </p-table>
+    </ng-container>
+  </ng-template>
+</p-panel>
+}

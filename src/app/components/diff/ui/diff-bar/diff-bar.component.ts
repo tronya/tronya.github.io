@@ -15,5 +15,5 @@ export class DiffBarComponent {
 
   ) {
   }
-  items = this.diffStoreService.diffItems;
+  items = this.diffStoreService.compareItems;
 }
