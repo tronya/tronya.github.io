@@ -6,6 +6,7 @@ import { colors } from '../helper';
 @Component({
   selector: 'money-counter',
   templateUrl: './money-counter.component.html',
+  styleUrl: './money-counter.component.scss',
   standalone: true,
   providers: [MonoBankApi],
   imports: [CommonModule],

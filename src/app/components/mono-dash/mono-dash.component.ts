@@ -5,6 +5,7 @@ import { colors } from './helper';
 import { CommonModule } from '@angular/common';
 import { map, timer } from 'rxjs';
 import { BgChangerComponent } from '../bg-changer/bg-changer.component';
+import { DroneAnimationComponent } from './drone-animation/drone-animation.component';
 
 @Component({
   selector: 'mono-dash',
@@ -15,6 +16,7 @@ import { BgChangerComponent } from '../bg-changer/bg-changer.component';
     MoneyCounterComponent,
     CommonModule,
     BgChangerComponent,
+    DroneAnimationComponent,
   ],
 })
 export class MonoDash implements OnInit {

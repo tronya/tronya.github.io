@@ -1,0 +1,22 @@
+@if(view$ | async; as view){
+<div
+  [ngStyle]="{
+    'width.px': 300,
+    'height.px': 300,
+    position: 'absolute',
+    transition: '5s',
+    transform: 'rotate(' + view.r + 'deg)'
+  }"
+>
+  <img
+    class="h-6 w-6 absolute ease-in"
+    src="../assets/drone.svg"
+    [ngStyle]="{
+      'top.px': view.x,
+      'left.px': view.y,
+      transition: '5s',
+      transform: 'rotate(' + view.r * 2 + 'deg)'
+    }"
+  />
+</div>
+}
