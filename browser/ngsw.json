@@ -1,0 +1,105 @@
+{
+  "configVersion": 1,
+  "timestamp": 1723467723680,
+  "index": "/tronya.github.io/index.html",
+  "assetGroups": [
+    {
+      "name": "app",
+      "installMode": "prefetch",
+      "updateMode": "prefetch",
+      "cacheQueryOptions": {
+        "ignoreVary": true
+      },
+      "urls": [
+        "/tronya.github.io/chunk-6SCSYJI5.js",
+        "/tronya.github.io/chunk-DFMMTXYG.js",
+        "/tronya.github.io/chunk-NL63BNXF.js",
+        "/tronya.github.io/chunk-ZGWP3VVX.js",
+        "/tronya.github.io/favicon.ico",
+        "/tronya.github.io/index.html",
+        "/tronya.github.io/main-W3REVZOR.js",
+        "/tronya.github.io/manifest.webmanifest",
+        "/tronya.github.io/polyfills-6EAL64PA.js",
+        "/tronya.github.io/styles-4TCQYIJS.css"
+      ],
+      "patterns": []
+    },
+    {
+      "name": "assets",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "cacheQueryOptions": {
+        "ignoreVary": true
+      },
+      "urls": [
+        "/tronya.github.io/assets/drone.svg",
+        "/tronya.github.io/assets/icons/icon-128x128.png",
+        "/tronya.github.io/assets/icons/icon-144x144.png",
+        "/tronya.github.io/assets/icons/icon-152x152.png",
+        "/tronya.github.io/assets/icons/icon-192x192.png",
+        "/tronya.github.io/assets/icons/icon-384x384.png",
+        "/tronya.github.io/assets/icons/icon-512x512.png",
+        "/tronya.github.io/assets/icons/icon-72x72.png",
+        "/tronya.github.io/assets/icons/icon-96x96.png",
+        "/tronya.github.io/media/Inter-italic.var-SWFAXF2C.woff2",
+        "/tronya.github.io/media/Inter-roman.var-WIJJYAE4.woff2",
+        "/tronya.github.io/media/color-3LUHUBGQ.png",
+        "/tronya.github.io/media/hue-RMMBQOAC.png",
+        "/tronya.github.io/media/primeicons-4GST5W3O.woff2",
+        "/tronya.github.io/media/primeicons-DHQU4SEP.svg",
+        "/tronya.github.io/media/primeicons-GEFHGEHP.ttf",
+        "/tronya.github.io/media/primeicons-P53SE5CV.woff"
+      ],
+      "patterns": []
+    }
+  ],
+  "dataGroups": [],
+  "hashTable": {
+    "/tronya.github.io/assets/drone.svg": "c0306233364667d4c5574535adf7f1d8770e0819",
+    "/tronya.github.io/assets/icons/icon-128x128.png": "f912963bdc6d5a38d8f1dd0afbaab2ce8d657acb",
+    "/tronya.github.io/assets/icons/icon-144x144.png": "b155fd5f2fd5d2ea7760721063003c4cd95fd783",
+    "/tronya.github.io/assets/icons/icon-152x152.png": "eae6e0f0c8afb8aaae339e2a569b43e9238e5e6c",
+    "/tronya.github.io/assets/icons/icon-192x192.png": "15c4180454633880d98674aa7394656196c91584",
+    "/tronya.github.io/assets/icons/icon-384x384.png": "94a915751ef6c9282df9aea405ad679230631814",
+    "/tronya.github.io/assets/icons/icon-512x512.png": "1de182f76f7329dfa8f9fcdd1fdcdd695bea6a99",
+    "/tronya.github.io/assets/icons/icon-72x72.png": "aa88a6096bd973be7f6d7a5489bfa6bc2463f8c4",
+    "/tronya.github.io/assets/icons/icon-96x96.png": "7fb8f59c30ce2ff12c700321a0b39e14b3dc8f95",
+    "/tronya.github.io/chunk-6SCSYJI5.js": "8095a2562e5b9989d664717392d750c4264e4e83",
+    "/tronya.github.io/chunk-DFMMTXYG.js": "8fe00e364a3125c18e23172bdb1706560a68aa2e",
+    "/tronya.github.io/chunk-NL63BNXF.js": "5ed3459bbacbd7f84343e12ebc75d0e5295a313c",
+    "/tronya.github.io/chunk-ZGWP3VVX.js": "71c53d0a1dbd58bcaad71719444d1d979ace4c77",
+    "/tronya.github.io/favicon.ico": "9c39f434fe1261f68c5e3eefdf734630d99c5670",
+    "/tronya.github.io/index.html": "e8c9e36a7fa65a7f2d201871bcc5bc7b0917872f",
+    "/tronya.github.io/main-W3REVZOR.js": "16e09ff3debd01b8092bb63a330350a4217c4427",
+    "/tronya.github.io/manifest.webmanifest": "867f3adba66619b1d475c7aa9ed33c316eae22bc",
+    "/tronya.github.io/media/Inter-italic.var-SWFAXF2C.woff2": "6f20a046917bf86d4b6cc29c4e2515bd64d2cb9b",
+    "/tronya.github.io/media/Inter-roman.var-WIJJYAE4.woff2": "7a2602d2ebb08ce895e33addb6fe595f1029431e",
+    "/tronya.github.io/media/color-3LUHUBGQ.png": "ff4c4bcb2207891b292f544edb4da9d2df5d45cf",
+    "/tronya.github.io/media/hue-RMMBQOAC.png": "f81ae627637a684614aa726e206c73ce099a01fd",
+    "/tronya.github.io/media/primeicons-4GST5W3O.woff2": "837c1279b6af9d297f34fdb43e6fcc9206a79f32",
+    "/tronya.github.io/media/primeicons-DHQU4SEP.svg": "a07ae39027c1a780b42fd82fad7575c2924d9d28",
+    "/tronya.github.io/media/primeicons-GEFHGEHP.ttf": "3b878ca7e88945a8ec25814810b95367d8977ae6",
+    "/tronya.github.io/media/primeicons-P53SE5CV.woff": "361e3af71bb4e515feead2f787348a92a5527158",
+    "/tronya.github.io/polyfills-6EAL64PA.js": "d874147a12a6570d9b44e99935e9de8b7f3cabbc",
+    "/tronya.github.io/styles-4TCQYIJS.css": "278f6ca066f4d317e567f5e011342d91bd29ad97"
+  },
+  "navigationUrls": [
+    {
+      "positive": true,
+      "regex": "^\\/.*$"
+    },
+    {
+      "positive": false,
+      "regex": "^\\/(?:.+\\/)?[^/]*\\.[^/]*$"
+    },
+    {
+      "positive": false,
+      "regex": "^\\/(?:.+\\/)?[^/]*__[^/]*$"
+    },
+    {
+      "positive": false,
+      "regex": "^\\/(?:.+\\/)?[^/]*__[^/]*\\/.*$"
+    }
+  ],
+  "navigationRequestStrategy": "performance"
+}
