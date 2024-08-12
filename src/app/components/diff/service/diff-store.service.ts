@@ -15,7 +15,6 @@ export class DiffStoreService {
     const findIfExisted = existedItems.find(
       (existed) => existed.item.guid === item.guid && existed.type === type
     );
-
     if (findIfExisted) {
       remove(
         existedItems,
@@ -25,7 +24,6 @@ export class DiffStoreService {
       this.compareItems.next(existedItems);
       return;
     }
-
     existedItems.push({ item, type });
     this.compareItems.next(existedItems);
   }
