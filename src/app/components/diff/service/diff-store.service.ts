@@ -1,8 +1,8 @@
 import { Injectable } from '@angular/core';
 import { remove } from 'lodash';
 import { BehaviorSubject } from 'rxjs';
-import { DiffItem, DiffTypes } from './models';
 import { DiffModelsTypes } from './dto';
+import { DiffItem, DiffTypes } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class DiffStoreService {
