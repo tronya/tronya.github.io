@@ -11,6 +11,7 @@ export enum ConfigTypes {
   ConfigReferance = 'ConfigReferance',
 }
 
+
 export class ConfigurationFactory<Config, Type> {
   getConfiguration(config: Config, items: Type[]) {
     if (isConfigurationGroup(config)) {
