@@ -15,9 +15,10 @@ export class DroneAnimationComponent implements OnInit {
   view$ = interval(5000).pipe(
     map((res) => {
       return {
-        x: this.getRandomArbitrary(0, this.wh),
-        y: this.getRandomArbitrary(0, this.ww),
-        r: this.getRandomArbitrary(0, 90),
+        x: this.getRandomArbitrary(0, this.ww / 2),
+        y: this.getRandomArbitrary(0, this.wh / 2),
+        r: this.getRandomArbitrary(0, 360),
+        s: this.getRandomArbitrary(0, 3),
       };
     })
   );
