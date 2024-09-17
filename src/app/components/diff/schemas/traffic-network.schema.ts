@@ -92,7 +92,7 @@ export const TrafficNetworkSchema: Schema = {
       ],
     },
     {
-      collapsed: false,
+      collapsed: true,
       name: 'Link Information',
       preload: true,
       key: 'linksDTO',
@@ -106,7 +106,7 @@ export const TrafficNetworkSchema: Schema = {
       collapsed: true,
       name: 'Nodes Information',
       preload: false,
-      key: 'nodesItems',
+      key: 'nodesDTO',
       method: {
         type: 'array',
         trackBy: 'guid',
@@ -115,7 +115,7 @@ export const TrafficNetworkSchema: Schema = {
     },
     {
       name: 'First level items',
-      collapsed: false,
+      collapsed: true,
       diffKeys: [
         {
           name: 'Nodes Count',

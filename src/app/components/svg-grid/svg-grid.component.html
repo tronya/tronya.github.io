@@ -1,0 +1,19 @@
+<h3>Black and White States Patterns</h3>
+<div class="flex gap-4 flex-wrap">
+  @for(pattern of blackAndWhitePatterns; track pattern){
+  <pattern [pattern]="pattern"></pattern>
+  }
+</div>
+
+<h3>Signal States Patterns</h3>
+<div class="flex gap-4 flex-wrap">
+  @for(pattern of signalStatesPossiblePatterns; track pattern){
+  <pattern [pattern]="pattern"></pattern>
+  }
+</div>
+<h3>Extra Patterns</h3>
+<div class="flex gap-4 flex-wrap">
+  @for(pattern of extraPatterns; track pattern){
+  <pattern [pattern]="pattern"></pattern>
+  }
+</div>
