@@ -513,7 +513,6 @@ export const FLASHING_SIGNALS = new Set<SignalStatesPossiblePatterns>([
   SignalStatePolychromePatternEnum.AMBER_FLASH,
   SignalStatePolychromePatternEnum.RED_FLASH,
   SignalStatePolychromePatternEnum.GREEN_FLASH,
-  SignalStatePolychromePatternEnum.AMBER_GREEN_FLASH,
 ]);
 
 export const CUSTOM_SIGNALS_WITH_LINE = new Set<SignalStatesPossiblePatterns>([

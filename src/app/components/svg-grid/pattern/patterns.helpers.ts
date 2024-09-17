@@ -177,8 +177,7 @@ export function multipleColorsPatterns(
   basePath: string,
   svg: any
 ): PatternStyles {
-  let mainLinePath: string = '',
-    strokePath: string = '',
+  let strokePath: string = '',
     arrowPath: string = '',
     extraPath: string = '',
     rect: { x: number; y: number; w: number; h: number } | undefined =
@@ -239,8 +238,8 @@ export function multipleColorsPatterns(
       break;
   }
   return {
-    mainLinePath,
-    strokePath,
+    mainLinePath: basePath,
+    strokePath: basePath,
     arrowPath,
     extraPath,
     rect,
