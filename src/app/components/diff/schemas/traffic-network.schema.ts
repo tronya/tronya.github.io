@@ -91,28 +91,28 @@ export const TrafficNetworkSchema: Schema = {
         },
       ],
     },
-    {
-      collapsed: true,
-      name: 'Link Information',
-      preload: true,
-      key: 'linksDTO',
-      method: {
-        type: 'array',
-        trackBy: 'guid',
-      },
-      schemaRef: LinksSchema,
-    },
-    {
-      collapsed: true,
-      name: 'Nodes Information',
-      preload: false,
-      key: 'nodesDTO',
-      method: {
-        type: 'array',
-        trackBy: 'guid',
-      },
-      schemaRef: NodesSchema,
-    },
+    // {
+    //   collapsed: true,
+    //   name: 'Link Information',
+    //   preload: true,
+    //   key: 'linksDTO',
+    //   method: {
+    //     type: 'array',
+    //     trackBy: 'guid',
+    //   },
+    //   schemaRef: LinksSchema,
+    // },
+    // {
+    //   collapsed: true,
+    //   name: 'Nodes Information',
+    //   preload: false,
+    //   key: 'nodesDTO',
+    //   method: {
+    //     type: 'array',
+    //     trackBy: 'guid',
+    //   },
+    //   schemaRef: NodesSchema,
+    // },
     {
       name: 'First level items',
       collapsed: true,

@@ -1,18 +1,20 @@
+import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { values } from 'lodash';
+import { TreeModule } from 'primeng/tree';
+import { SiplSignalLayerComponent } from './layers/signal-layer/signal-layer.component';
 import {
-  SignalStatesPossiblePatterns,
-  SignalStatePolychromePatternEnum,
-  SignalStatePatternsExtraEnum,
   BlackAndWhitePatternsEnum,
+  SignalStatePatternsExtraEnum,
+  SignalStatePolychromePatternEnum,
+  SignalStatesPossiblePatterns,
 } from './models';
-import { PatternComponent } from './pattern/pattern.component';
-import { CommonModule } from '@angular/common';
+import { DiagramComponent } from './diagram/diagram-sipl.component';
 
 @Component({
   standalone: true,
   templateUrl: './svg-grid.component.html',
-  imports: [PatternComponent, CommonModule],
+  imports: [CommonModule, TreeModule, DiagramComponent],
 })
 export class SvgGrid {
   public signalStatesPossiblePatterns: SignalStatesPossiblePatterns[] = values(

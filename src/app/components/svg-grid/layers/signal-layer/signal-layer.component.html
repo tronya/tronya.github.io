@@ -1,0 +1,3 @@
+<ng-container *ngFor="let layer of layers; tranckBy: trackByLayer">
+  <svg:g signal-pattern [layer]="layer" [attr.pattern]="layer.pattern"></svg:g>
+</ng-container>
