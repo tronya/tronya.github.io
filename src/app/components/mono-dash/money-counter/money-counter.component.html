@@ -1,20 +1,6 @@
-<div class="holla">
+<div class="text-center">
   @if( jatReq$ | async; as jar) {
-  <h1
-    class="text-9xl font-bold relative text-black"
-    [ngStyle]="{
-      color: '#000',
-      'text-shadow': '3px 3px 1px #444'
-    }"
-  >
-    {{ jar }}
-  </h1>
+  <h1 class="glitch" attr.data-text="{{ jar.amount }}">{{ jar.amount }}</h1>
+  <span class="sub">{{ jar.description }}</span>
   }
-  <!-- <div>
-    @if(diff$ | async; as diff){
-    <p [ngClass]="{ 'text-green-400': diff > 0, 'text-red-500': diff < 0 }">
-      {{ diff }}
-    </p>
-    }
-  </div> -->
 </div>

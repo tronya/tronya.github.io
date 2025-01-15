@@ -14,5 +14,4 @@ import { colors } from '../helper';
 export class MoneyCounterComponent {
   httpJAR = inject(MonoBankApi);
   jatReq$ = this.httpJAR.getJarNUmber();
-  randomColor = colors[Math.floor(Math.random() * colors.length)];
 }

@@ -11,13 +11,7 @@ import { DroneAnimationComponent } from './drone-animation/drone-animation.compo
   selector: 'mono-dash',
   templateUrl: './mono-dash.component.html',
   standalone: true,
-  imports: [
-    QRCodeComponent,
-    MoneyCounterComponent,
-    CommonModule,
-    BgChangerComponent,
-    DroneAnimationComponent,
-  ],
+  imports: [MoneyCounterComponent, CommonModule, BgChangerComponent],
 })
 export class MonoDash implements OnInit {
   timerDelay = 60 * 60 * 1000;

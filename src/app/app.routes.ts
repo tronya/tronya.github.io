@@ -5,6 +5,8 @@ import { PlaygroundComponent } from './components/playground/playground.componen
 import { NodesComponent } from './components/nodes/nodes.component';
 import { LiveChuncks } from './components/live-chunks/live-chunks.component';
 import { SvgGrid } from './components/svg-grid/svg-grid.component';
+import { ChartComponent } from './components/chart/chart.component';
+import { StrategyGraphComponent } from './components/strategy-graph/strategy-graph.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', component: MonoDash },
@@ -13,4 +15,6 @@ export const routes: Routes = [
   { path: 'nodes', component: NodesComponent },
   { path: 'live-chunks', component: LiveChuncks },
   { path: 'svg-grid', component: SvgGrid },
+  { path: 'chart', component: ChartComponent },
+  { path: 'strategy', component: StrategyGraphComponent },
 ];
