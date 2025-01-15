@@ -13,12 +13,11 @@ import { DataQueryService } from '../service/data-query.service';
 import {} from '@angular/common/http';
 
 @Component({
-  templateUrl: './movie.component.html',
-  selector: 'movie',
-  standalone: true,
-  imports: [CommonModule],
-  host: { class: 'm-4' },
-  providers: [DataQueryService],
+    templateUrl: './movie.component.html',
+    selector: 'movie',
+    imports: [CommonModule],
+    host: { class: 'm-4' },
+    providers: [DataQueryService]
 })
 export class MovieComponent {
   imageUrl = 'https://image.tmdb.org/t/p/w500';

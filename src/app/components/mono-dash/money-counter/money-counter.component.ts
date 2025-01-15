@@ -4,12 +4,11 @@ import { MonoBankApi } from '../../../../api/monobank';
 import { colors } from '../helper';
 
 @Component({
-  selector: 'money-counter',
-  templateUrl: './money-counter.component.html',
-  styleUrl: './money-counter.component.scss',
-  standalone: true,
-  providers: [MonoBankApi],
-  imports: [CommonModule],
+    selector: 'money-counter',
+    templateUrl: './money-counter.component.html',
+    styleUrl: './money-counter.component.scss',
+    providers: [MonoBankApi],
+    imports: [CommonModule]
 })
 export class MoneyCounterComponent {
   httpJAR = inject(MonoBankApi);

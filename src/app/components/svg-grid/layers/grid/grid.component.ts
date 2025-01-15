@@ -9,10 +9,9 @@ interface Cell {
 }
 
 @Component({
-  selector: '[grid-layer]',
-  templateUrl: 'grid.component.html',
-  standalone: true,
-  imports: [],
+    selector: '[grid-layer]',
+    templateUrl: 'grid.component.html',
+    imports: []
 })
 export class GridLayerComponent implements OnInit{
   @Input() public cols = 200;

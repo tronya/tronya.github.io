@@ -21,11 +21,10 @@ import { map } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
 @Component({
-  templateUrl: './movies.component.html',
-  selector: 'movies',
-  standalone: true,
-  imports: [CommonModule, MovieComponent, PaginatorComponent],
-  providers: [DataQueryService],
+    templateUrl: './movies.component.html',
+    selector: 'movies',
+    imports: [CommonModule, MovieComponent, PaginatorComponent],
+    providers: [DataQueryService]
 })
 export class Movies {
   page: WritableSignal<number> = signal(1);

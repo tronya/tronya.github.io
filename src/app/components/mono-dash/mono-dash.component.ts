@@ -8,10 +8,9 @@ import { BgChangerComponent } from '../bg-changer/bg-changer.component';
 import { DroneAnimationComponent } from './drone-animation/drone-animation.component';
 
 @Component({
-  selector: 'mono-dash',
-  templateUrl: './mono-dash.component.html',
-  standalone: true,
-  imports: [MoneyCounterComponent, CommonModule, BgChangerComponent],
+    selector: 'mono-dash',
+    templateUrl: './mono-dash.component.html',
+    imports: [MoneyCounterComponent, CommonModule, BgChangerComponent]
 })
 export class MonoDash implements OnInit {
   timerDelay = 60 * 60 * 1000;

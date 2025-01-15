@@ -9,19 +9,18 @@ import { ConfigTypes } from '../../service/ConfigurationFactory';
 import { DiffSectionGroupComponent } from '../diff-sections/diff-section-group/diff-section-group.component';
 import { DiffSectionReferanceComponent } from '../diff-sections/diff-section-referance/diff-section-referance.component';
 @Component({
-  standalone: true,
-  selector: 'diff-table',
-  templateUrl: './diff-table.component.html',
-  providers: [DiffComparatorService],
-  imports: [
-    CommonModule,
-    TableModule,
-    TagModule,
-    ButtonModule,
-    //
-    DiffSectionGroupComponent,
-    DiffSectionReferanceComponent,
-  ],
+    selector: 'diff-table',
+    templateUrl: './diff-table.component.html',
+    providers: [DiffComparatorService],
+    imports: [
+        CommonModule,
+        TableModule,
+        TagModule,
+        ButtonModule,
+        //
+        DiffSectionGroupComponent,
+        DiffSectionReferanceComponent,
+    ]
 })
 export class DiffTableComponent {
   table$ = this.diffComparator.diffResult;

@@ -19,18 +19,17 @@ import { DiffBarComponent } from './ui/diff-bar/diff-bar.component';
 import { DiffTableComponent } from './ui/diff-table/diff-table.component';
 
 @Component({
-  standalone: true,
-  selector: 'diff',
-  templateUrl: './diff.component.html',
-  imports: [
-    CommonModule,
-    DiffBarComponent,
-    DiffTableComponent,
-    ButtonModule,
-    ToastModule,
-    RippleModule,
-  ],
-  providers: [DiffStoreService, MessageService],
+    selector: 'diff',
+    templateUrl: './diff.component.html',
+    imports: [
+        CommonModule,
+        DiffBarComponent,
+        DiffTableComponent,
+        ButtonModule,
+        ToastModule,
+        RippleModule,
+    ],
+    providers: [DiffStoreService, MessageService]
 })
 export class DiffComponent {
   tn1 = trafficNetwork;

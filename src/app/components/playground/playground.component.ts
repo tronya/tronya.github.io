@@ -5,9 +5,8 @@ import { Movies } from '../movies/movies.component';
 import {} from '@angular/common/http';
 
 @Component({
-  selector: 'playground',
-  templateUrl: './playground.component.html',
-  standalone: true,
-  imports: [RxLet, CommonModule, Movies],
+    selector: 'playground',
+    templateUrl: './playground.component.html',
+    imports: [RxLet, CommonModule, Movies]
 })
 export class PlaygroundComponent {}

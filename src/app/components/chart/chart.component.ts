@@ -6,9 +6,8 @@ import { mock, ReportsUtils } from './mock';
 import Highcharts from 'highcharts';
 
 @Component({
-  templateUrl: 'chart.component.html',
-  standalone: true,
-  imports: [CommonModule, HighchartsChartModule],
+    templateUrl: 'chart.component.html',
+    imports: [CommonModule, HighchartsChartModule]
 })
 export class ChartComponent implements OnInit {
   private chartOptions: Highcharts.Options = {}; // Define chart options here

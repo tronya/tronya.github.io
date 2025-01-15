@@ -4,13 +4,12 @@ import { SiplSignalLayerComponent } from '../layers/signal-layer/signal-layer.co
 import { DetectorLayerComponent } from '../layers/detector-layer/detector-layer.component';
 
 @Component({
-  templateUrl: 'diagram-sipl.component.html',
-  selector: 'diagram-sipl',
-  standalone: true,
-  imports: [
-    SiplSignalLayerComponent,
-    GridLayerComponent,
-    DetectorLayerComponent,
-  ],
+    templateUrl: 'diagram-sipl.component.html',
+    selector: 'diagram-sipl',
+    imports: [
+        SiplSignalLayerComponent,
+        GridLayerComponent,
+        DetectorLayerComponent,
+    ]
 })
 export class DiagramComponent {}

@@ -33,18 +33,17 @@ const defaultSection: ConfigGroup<ConfigTypes.ConfigGroup> = {
 };
 
 @Component({
-  standalone: true,
-  selector: 'diff-section-group',
-  templateUrl: './diff-section-group.component.html',
-  imports: [
-    CommonModule,
-    TableModule,
-    PanelModule,
-    ProgressBarModule,
-    SelectButtonModule,
-    ToggleButtonModule,
-  ],
-  host: { class: 'w-full' },
+    selector: 'diff-section-group',
+    templateUrl: './diff-section-group.component.html',
+    imports: [
+        CommonModule,
+        TableModule,
+        PanelModule,
+        ProgressBarModule,
+        SelectButtonModule,
+        ToggleButtonModule,
+    ],
+    host: { class: 'w-full' }
 })
 export class DiffSectionGroupComponent {
   @Input() set section(section: ConfigGroup<ConfigTypes.ConfigGroup>) {

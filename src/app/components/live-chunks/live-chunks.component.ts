@@ -22,9 +22,8 @@ import { DataStorage } from './DataStorage';
 import { startsWith } from 'lodash';
 
 @Component({
-  standalone: true,
-  templateUrl: 'live-chunks.component.html',
-  imports: [RxLet, CommonModule],
+    templateUrl: 'live-chunks.component.html',
+    imports: [RxLet, CommonModule]
 })
 export class LiveChuncks implements OnDestroy {
   private index = 0;

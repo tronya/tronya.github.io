@@ -3,10 +3,9 @@ import { Component, OnInit } from '@angular/core';
 import { interval, map } from 'rxjs';
 
 @Component({
-  selector: 'drone-animation',
-  templateUrl: './drone-animation.component.html',
-  standalone: true,
-  imports: [CommonModule],
+    selector: 'drone-animation',
+    templateUrl: './drone-animation.component.html',
+    imports: [CommonModule]
 })
 export class DroneAnimationComponent implements OnInit {
   wh = window.innerHeight;

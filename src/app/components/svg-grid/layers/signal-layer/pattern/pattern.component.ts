@@ -16,10 +16,9 @@ export interface SignalLayerItem {
 }
 
 @Component({
-  templateUrl: 'pattern.component.html',
-  selector: '[signal-pattern]',
-  standalone: true,
-  imports: [CommonModule],
+    templateUrl: 'pattern.component.html',
+    selector: '[signal-pattern]',
+    imports: [CommonModule]
 })
 export class SignalPatternComponent {
   public template?: SafeHtml;

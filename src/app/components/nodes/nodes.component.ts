@@ -9,10 +9,9 @@ export interface NodeZ {
 }
 
 @Component({
-  standalone: true,
-  imports: [NodeComponent, CommonModule],
-  template: '<div><p>Hello</p></div>',
-  selector: 'nodes',
+    imports: [NodeComponent, CommonModule],
+    template: '<div><p>Hello</p></div>',
+    selector: 'nodes'
 })
 export class NodesComponent {
   nodes: NodeZ[] = [

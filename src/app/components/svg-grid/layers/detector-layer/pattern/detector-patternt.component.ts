@@ -13,10 +13,9 @@ export interface DetectorLayerItem {
 }
 
 @Component({
-  templateUrl: 'detector-patternt.component.html',
-  selector: '[detector-pattern]',
-  standalone: true,
-  imports: [CommonModule],
+    templateUrl: 'detector-patternt.component.html',
+    selector: '[detector-pattern]',
+    imports: [CommonModule]
 })
 export class DetectorPatternComponent {
   public template?: SafeHtml;

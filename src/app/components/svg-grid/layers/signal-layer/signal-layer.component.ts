@@ -12,10 +12,9 @@ import {
 } from './pattern/pattern.component';
 
 @Component({
-  standalone: true,
-  templateUrl: './signal-layer.component.html',
-  selector: '[swarco-sipl-signal-layer]',
-  imports: [SignalPatternComponent, CommonModule],
+    templateUrl: './signal-layer.component.html',
+    selector: '[swarco-sipl-signal-layer]',
+    imports: [SignalPatternComponent, CommonModule]
 })
 export class SiplSignalLayerComponent {
   layers: SignalLayerItem[] = [

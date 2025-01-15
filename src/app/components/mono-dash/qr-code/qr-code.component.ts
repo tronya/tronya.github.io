@@ -4,10 +4,9 @@ import { QRCODE_JAR } from '../../ui/canva/helpers/qr-code';
 import { colors } from '../helper';
 
 @Component({
-  selector: 'qr-code',
-  templateUrl: './qr-code.component.html',
-  standalone: true,
-  imports: [CommonModule],
+    selector: 'qr-code',
+    templateUrl: './qr-code.component.html',
+    imports: [CommonModule]
 })
 export class QRCodeComponent {
   qr_jar = QRCODE_JAR.map((row, i) =>

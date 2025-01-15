@@ -12,10 +12,9 @@ export interface DetectorLayerItem {
 }
 
 @Component({
-  standalone: true,
-  templateUrl: './detector-layer.component.html',
-  selector: '[swarco-detector-signal-layer]',
-  imports: [CommonModule, DetectorPatternComponent],
+    templateUrl: './detector-layer.component.html',
+    selector: '[swarco-detector-signal-layer]',
+    imports: [CommonModule, DetectorPatternComponent]
 })
 export class DetectorLayerComponent {
   layers: DetectorLayerItem[] = [...values(DetectorPossiblePatternsEnum)].map(

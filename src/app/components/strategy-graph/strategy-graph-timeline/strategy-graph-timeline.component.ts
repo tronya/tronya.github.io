@@ -12,11 +12,10 @@ import { delay } from 'rxjs';
 HCMore(Highcharts);
 
 @Component({
-  standalone: true,
-  templateUrl: './strategy-graph-timeline.component.html',
-  selector: 'strategy-timeline',
-  imports: [CommonModule, HighchartsChartModule],
-  providers: [StrategyHistoryStoreService, StrategiesService],
+    templateUrl: './strategy-graph-timeline.component.html',
+    selector: 'strategy-timeline',
+    imports: [CommonModule, HighchartsChartModule],
+    providers: [StrategyHistoryStoreService, StrategiesService]
 })
 export class StrategyGraphTimelineComponent {
   public Highcharts: typeof Highcharts = Highcharts;

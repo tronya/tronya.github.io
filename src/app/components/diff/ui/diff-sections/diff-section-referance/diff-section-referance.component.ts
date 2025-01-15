@@ -43,21 +43,19 @@ const defaultSection: ConfigReferance<ConfigTypes.ConfigReferance> = {
 };
 
 @Component({
-  standalone: true,
-  selector: 'diff-section-referance',
-  templateUrl: './diff-section-referance.component.html',
-  imports: [
-    CommonModule,
-    TableModule,
-    PanelModule,
-    ProgressBarModule,
-    SelectButtonModule,
-    ToggleButtonModule,
-
-    //
-    DiffSectionGroupComponent,
-  ],
-  host: { class: 'w-full' },
+    selector: 'diff-section-referance',
+    templateUrl: './diff-section-referance.component.html',
+    imports: [
+        CommonModule,
+        TableModule,
+        PanelModule,
+        ProgressBarModule,
+        SelectButtonModule,
+        ToggleButtonModule,
+        //
+        DiffSectionGroupComponent,
+    ],
+    host: { class: 'w-full' }
 })
 export class DiffSectionReferanceComponent {
   loaded = signal(false);

@@ -12,9 +12,8 @@ import {
 import { DiagramComponent } from './diagram/diagram-sipl.component';
 
 @Component({
-  standalone: true,
-  templateUrl: './svg-grid.component.html',
-  imports: [CommonModule, TreeModule, DiagramComponent],
+    templateUrl: './svg-grid.component.html',
+    imports: [CommonModule, TreeModule, DiagramComponent]
 })
 export class SvgGrid {
   public signalStatesPossiblePatterns: SignalStatesPossiblePatterns[] = values(
