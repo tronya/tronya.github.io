@@ -2,28 +2,19 @@ import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, signal } from '@angular/core';
 import { RxLet } from '@rx-angular/template/let';
 import {
-  BehaviorSubject,
-  ReplaySubject,
   Subject,
-  combineLatest,
-  concatMap,
   distinctUntilChanged,
-  exhaustMap,
-  filter,
   interval,
   map,
-  mergeMap,
   switchMap,
-  take,
   timer,
   withLatestFrom,
 } from 'rxjs';
 import { DataStorage } from './DataStorage';
-import { startsWith } from 'lodash';
 
 @Component({
-    templateUrl: 'live-chunks.component.html',
-    imports: [RxLet, CommonModule]
+  templateUrl: 'live-chunks.component.html',
+  imports: [CommonModule],
 })
 export class LiveChuncks implements OnDestroy {
   private index = 0;

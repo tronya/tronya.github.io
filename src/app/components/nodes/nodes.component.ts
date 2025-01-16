@@ -1,7 +1,6 @@
+import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { NodeComponent } from './node.component';
-import { BrowserModule } from '@angular/platform-browser';
-import { CommonModule } from '@angular/common';
 
 export interface NodeZ {
   id: string;
@@ -9,9 +8,9 @@ export interface NodeZ {
 }
 
 @Component({
-    imports: [NodeComponent, CommonModule],
-    template: '<div><p>Hello</p></div>',
-    selector: 'nodes'
+  imports: [CommonModule],
+  template: '<div><p>Hello</p></div>',
+  selector: 'nodes',
 })
 export class NodesComponent {
   nodes: NodeZ[] = [

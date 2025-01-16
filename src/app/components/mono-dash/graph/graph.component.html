@@ -1,0 +1,24 @@
+<div class="flex items-end justify-between roboto-thin">
+  @for(item of alreadyCouldBye; track item){
+  <div class="item" [style.width.%]="item.width">
+    <p>{{ item.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}</p>
+  </div>
+  }
+
+  <div
+    class="item founded"
+    [style.width.%]="lastNeededMoney.alreadyHave.percentage"
+  >
+    <p>
+      {{ lastNeededMoney.alreadyHave.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}
+    </p>
+  </div>
+  <div
+    class="item remain"
+    [style.width.%]="lastNeededMoney.stillNeeded.percentage"
+  >
+    <p>
+      {{ lastNeededMoney.stillNeeded.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}
+    </p>
+  </div>
+</div>

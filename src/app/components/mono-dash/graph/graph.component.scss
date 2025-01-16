@@ -1,0 +1,18 @@
+.item {
+  border-top: 5px solid #229799;
+  border-right: 1px solid #999;
+  padding: 0 1rem;
+  text-align: right;
+  min-width: 10rem;
+
+  &.founded {
+    border-top-color: #48cfcb;
+  }
+
+  &.remain {
+    border-top-color: #f5f5f5;
+  }
+  & p {
+    margin: 0.5rem 0;
+  }
+}

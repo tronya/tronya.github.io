@@ -1,16 +1,19 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject } from '@angular/core';
+import { Component } from '@angular/core';
 import { MonoBankApi } from '../../../../api/monobank';
-import { colors } from '../helper';
 
 @Component({
-    selector: 'money-counter',
-    templateUrl: './money-counter.component.html',
-    styleUrl: './money-counter.component.scss',
-    providers: [MonoBankApi],
-    imports: [CommonModule]
+  selector: 'money-counter',
+  templateUrl: './money-counter.component.html',
+  styleUrl: './money-counter.component.scss',
+  imports: [CommonModule],
 })
 export class MoneyCounterComponent {
-  httpJAR = inject(MonoBankApi);
-  jatReq$ = this.httpJAR.getJarNUmber();
+  jatReq$ = this.monoBankApi.currentJarValue;
+
+  subscription = this.monoBankApi.getJarNUmber();
+
+  constructor(private monoBankApi: MonoBankApi) {
+    this.subscription.subscribe();
+  }
 }

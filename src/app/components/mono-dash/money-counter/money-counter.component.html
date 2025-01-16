@@ -1,6 +1,7 @@
 <div class="text-center">
   @if( jatReq$ | async; as jar) {
-  <h1 class="glitch" attr.data-text="{{ jar.amount }}">{{ jar.amount }}</h1>
-  <span class="sub">{{ jar.description }}</span>
+  <h1 class="glitch roboto-bold" attr.data-text="{{ jar.amount }}">
+    {{ jar.amount }}
+  </h1>
   }
 </div>

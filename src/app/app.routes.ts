@@ -7,6 +7,7 @@ import { LiveChuncks } from './components/live-chunks/live-chunks.component';
 import { SvgGrid } from './components/svg-grid/svg-grid.component';
 import { ChartComponent } from './components/chart/chart.component';
 import { StrategyGraphComponent } from './components/strategy-graph/strategy-graph.component';
+import { ElevatorComponent } from './components/elevator/elevator.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', component: MonoDash },
@@ -17,4 +18,5 @@ export const routes: Routes = [
   { path: 'svg-grid', component: SvgGrid },
   { path: 'chart', component: ChartComponent },
   { path: 'strategy', component: StrategyGraphComponent },
+  { path: 'elevator', component: ElevatorComponent },
 ];
