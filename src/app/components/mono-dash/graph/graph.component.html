@@ -1,7 +1,8 @@
 <div class="flex items-end justify-between roboto-thin">
-  @for(item of alreadyCouldBye; track item){
+  @for(item of alreadyCouldBye; track item.iterator){
   <div class="item" [style.width.%]="item.width">
     <p>{{ item.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}</p>
+    <img class="h-6 w-6 ml-6 ease-in" src="../assets/drone.svg" />
   </div>
   }
 
@@ -10,7 +11,10 @@
     [style.width.%]="lastNeededMoney.alreadyHave.percentage"
   >
     <p>
-      {{ lastNeededMoney.alreadyHave.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}
+      {{
+        lastNeededMoney.alreadyHave.cost
+          | currencyWithSpace : "UAH" : "symbol" : "1.0-0"
+      }}
     </p>
   </div>
   <div
@@ -18,7 +22,10 @@
     [style.width.%]="lastNeededMoney.stillNeeded.percentage"
   >
     <p>
-      {{ lastNeededMoney.stillNeeded.cost | currencyWithSpace : "UAH" : "symbol" : "1.0-0" }}
+      {{
+        lastNeededMoney.stillNeeded.cost
+          | currencyWithSpace : "UAH" : "symbol" : "1.0-0"
+      }}
     </p>
   </div>
 </div>

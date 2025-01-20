@@ -4,6 +4,9 @@
   padding: 0 1rem;
   text-align: right;
   min-width: 10rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 
   &.founded {
     border-top-color: #48cfcb;
@@ -14,5 +17,6 @@
   }
   & p {
     margin: 0.5rem 0;
+    color: white;
   }
 }

@@ -54,7 +54,7 @@ export class Particle {
     this.x += this.vx;
     this.y += this.vy;
 
-    
+
     ctx.fillStyle = this.color;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2, false); // Corrected arguments

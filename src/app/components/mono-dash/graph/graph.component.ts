@@ -14,7 +14,7 @@ import { CurrencyWithSpacePipe } from './currency.pipe';
 })
 export class GraphComponent {
   constructor(private monobankApi: MonoBankApi) {
-    this.monobankApi.currentJarValue.subscribe((jar) => {
+    this.monobankApi.getFormattedJarData().subscribe((jar) => {
       console.log(jar);
       this.showBar(+jar.amount);
     });

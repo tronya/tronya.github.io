@@ -1,62 +1,74 @@
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { inject, Injectable } from '@angular/core';
-import {
-  BehaviorSubject,
-  distinctUntilChanged,
-  map,
-  shareReplay,
-  switchMap,
-  tap,
-  timer,
-} from 'rxjs';
-import { IResponse } from '../app/components/dots-text/particles/particles.helper';
+import { BehaviorSubject, interval, forkJoin } from 'rxjs';
+import { switchMap, shareReplay, startWith, map } from 'rxjs/operators';
 import {
   MONOBANK_HOST,
-  MONOBANK_JAR,
   MONOBANK_JAR_ROUTE,
+  MONOBANK_JAR,
 } from './mono-rest-ep';
 import { LinkGeneratorFactory } from './monobank-link-generator';
+import { DTOCurrency, DTOJar } from './monobank.model';
 
 @Injectable({
-  providedIn: 'root', // Makes the service a singleton, shared across the app
+  providedIn: 'root', // Сервіс буде синглтоном в додатку
 })
 export class MonoBankApi {
-  private http = inject(HttpClient);
-  private timerTime = timer(0, 1 * 30 * 1000);
-
-  public currentJarValue = new BehaviorSubject<{
-    amount: string;
-    description: string;
-  }>({
-    amount: '',
-    description: '',
-  });
-
   private jarFactory = new LinkGeneratorFactory({
     host: MONOBANK_HOST,
     route: MONOBANK_JAR_ROUTE,
     jar: MONOBANK_JAR,
   });
 
-  private jarLink = this.jarFactory.getJarLink();
-  private currencyLink = this.jarFactory.getCurrency();
+  private readonly jarLink = this.jarFactory.getJarLink();
+  private readonly currencyLink = this.jarFactory.getCurrency();
+  private readonly updateInterval = 60000; // Оновлення раз в хвилину (60000 мс)
 
-  private responce = this.timerTime.pipe(
-    shareReplay(1),
-    switchMap(() => this.http.get<IResponse>(this.jarLink)),
-    distinctUntilChanged()
-  );
+  private readonly jarDataSubject = new BehaviorSubject<DTOJar | null>(null);
+  private readonly currencyDataSubject = new BehaviorSubject<DTOCurrency | null>(null);
 
-  getJarNUmber() {
-    return this.responce.pipe(
-      map((res) => ({
-        amount:
-          res.amount.toString().slice(0, -2) +
-          '.' +
-          res.amount.toString().slice(-2),
-        description: res.description,
-      })),
-      tap((res) => this.currentJarValue.next(res))
+  jarData$ = this.jarDataSubject.asObservable(); // Для підписки на дані банку
+  currencyData$ = this.currencyDataSubject.asObservable(); // Для підписки на дані валюти
+
+  constructor(private http: HttpClient) {
+    this.initializeDataFetching();
+  }
+
+  private initializeDataFetching() {
+    interval(this.updateInterval)
+      .pipe(
+        startWith(0), // Одразу виконує перший запит
+        switchMap(() =>
+          forkJoin({
+            jar: this.http.get<DTOJar>(this.jarLink),
+            currency: this.http.get<DTOCurrency>(this.currencyLink),
+          })
+        ),
+        shareReplay(1) // Кешує останнє значення
+      )
+      .subscribe({
+        next: ({ jar, currency }) => {
+          this.jarDataSubject.next(jar);
+          this.currencyDataSubject.next(currency);
+        },
+        error: (err) => {
+          console.error('Failed to fetch data:', err);
+        },
+      });
+  }
+
+  // Метод для отримання форматованих даних банку
+  getFormattedJarData() {
+    return this.jarData$.pipe(
+      map((jar) => {
+        if (!jar) {
+          return { amount: '', description: '' };
+        }
+        return {
+          amount: (jar.amount / 100).toFixed(2),
+          description: jar.description,
+        };
+      })
     );
   }
 }
