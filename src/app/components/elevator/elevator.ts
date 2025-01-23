@@ -1,44 +1,43 @@
-import { signal } from '@angular/core';
+import { uniqBy } from 'lodash';
 import { BehaviorSubject } from 'rxjs';
 
 export class Elevator {
   private floors: (number | string)[] = [];
-  private floorQueue = signal<Floor[]>([]);
+  public floorQueue = new BehaviorSubject<Floor[]>([]);
+  private position = new BehaviorSubject(0);
 
   constructor(floors: (number | string)[]) {
     this.floors = floors;
   }
 
   buttonClicked(floor: number) {
-    const floorClick = new Floor(floor);
-    const isExists = this.floorQueue().some((f) => f.floor === floor);
-    if (!isExists) {
-      this.floorQueue().push(floorClick);
-    }
-    console.log(isExists, this.floorQueue());
+    const newFloor = new Floor(floor);
+    const currentQueue = this.floorQueue.getValue();
+
+    // Add the floor to the queue if it's not already present
+    const updatedQueue = uniqBy([...currentQueue, newFloor], (f) => f.floor);
+    this.floorQueue.next(updatedQueue);
   }
 
-  countOfFlorsLength() {
-    return this.floors.length;
+  getFloors(): readonly (number | string)[] {
+    return [...this.floors];
   }
 
-  getFloors() {
-    return this.floors;
-  }
-
-  getQueue() {
-    return this.floorQueue();
+  getPosition() {
+    return this.position.asObservable();
   }
 }
 
 class Floor {
   public floor: number | string;
-  public destination: boolean;
+  public inPlan: boolean;
   public doorOpen: boolean;
+  public doorClosed: boolean;
 
-  constructor(floor: string | number, destination: boolean = false) {
+  constructor(floor: string | number, inPlan: boolean = true) {
     this.floor = floor;
-    this.destination = !!destination;
+    this.inPlan = !!inPlan;
     this.doorOpen = false;
+    this.doorClosed = true;
   }
 }

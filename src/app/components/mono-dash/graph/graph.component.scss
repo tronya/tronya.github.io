@@ -7,6 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  transition: 3s;
 
   &.founded {
     border-top-color: #48cfcb;

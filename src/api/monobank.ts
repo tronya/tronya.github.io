@@ -25,12 +25,14 @@ export class MonoBankApi {
   private readonly updateInterval = 60000; // Оновлення раз в хвилину (60000 мс)
 
   private readonly jarDataSubject = new BehaviorSubject<DTOJar | null>(null);
-  private readonly currencyDataSubject = new BehaviorSubject<DTOCurrency | null>(null);
+  private readonly currencyDataSubject =
+    new BehaviorSubject<DTOCurrency | null>(null);
 
   jarData$ = this.jarDataSubject.asObservable(); // Для підписки на дані банку
   currencyData$ = this.currencyDataSubject.asObservable(); // Для підписки на дані валюти
 
   constructor(private http: HttpClient) {
+    console.log('init');
     this.initializeDataFetching();
   }
 
@@ -38,18 +40,12 @@ export class MonoBankApi {
     interval(this.updateInterval)
       .pipe(
         startWith(0), // Одразу виконує перший запит
-        switchMap(() =>
-          forkJoin({
-            jar: this.http.get<DTOJar>(this.jarLink),
-            currency: this.http.get<DTOCurrency>(this.currencyLink),
-          })
-        ),
+        switchMap(() => this.http.get<DTOJar>(this.jarLink)),
         shareReplay(1) // Кешує останнє значення
       )
       .subscribe({
-        next: ({ jar, currency }) => {
+        next: (jar) => {
           this.jarDataSubject.next(jar);
-          this.currencyDataSubject.next(currency);
         },
         error: (err) => {
           console.error('Failed to fetch data:', err);

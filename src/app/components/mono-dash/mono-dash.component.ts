@@ -21,6 +21,4 @@ export class MonoDash implements OnInit {
   // 271.37
 
   time$ = timer(0, 1000).pipe(map(() => new Date().toUTCString()));
-
-  randomColor = colors[Math.floor(Math.random() * colors.length)];
 }

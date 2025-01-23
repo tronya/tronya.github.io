@@ -1,5 +1,8 @@
 <h1>Elevator</h1>
-{{activeFloors | json}}
+<p>
+  {{ queue | async | json }}
+</p>
+
 <p-selectbutton
   [options]="floorsNumbers"
   (onOptionClick)="clickingFloor($event)"
@@ -9,15 +12,19 @@
   optionValue="value"
 />
 
-<div class="building bg-black p-5 relative">
+<div class="building bg-black relative">
   <div
-    class="flex flex-col items-center justify-around gap-4 text-white text-sm text-center font-bold leading-6"
+    class="flex flex-col items-center justify-around text-white text-sm text-center font-bold leading-6"
   >
     @for(floor of floors(); track floor){
-    <div class="p-5 bg-slate-500 border-b-4 border-indigo-500 min-w-20">
+    <div class="p-5 floor bg-slate-500 border-b-4 border-indigo-500 min-w-20">
       {{ floor }}
     </div>
     }
   </div>
-  <div class="elevator bg-green-400 w-10 h-10 absolute" [style.top]="0"></div>
+  {{ position | async }}
+  <div
+    class="elevator bg-green-400 absolute"
+    [style.top.px]="position | async"
+  ></div>
 </div>

@@ -1,8 +1,9 @@
 import { CommonModule, CurrencyPipe } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import * as Highcharts from 'highcharts';
 import { MonoBankApi } from '../../../../api/monobank';
 import { CurrencyWithSpacePipe } from './currency.pipe';
+import { Subscription, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'graph',
@@ -12,12 +13,19 @@ import { CurrencyWithSpacePipe } from './currency.pipe';
   imports: [CommonModule, CurrencyWithSpacePipe],
   providers: [CurrencyPipe],
 })
-export class GraphComponent {
+export class GraphComponent implements OnDestroy {
+  private subscription = new Subscription();
   constructor(private monobankApi: MonoBankApi) {
-    this.monobankApi.getFormattedJarData().subscribe((jar) => {
-      console.log(jar);
-      this.showBar(+jar.amount);
-    });
+    this.subscription = this.monobankApi
+      .getFormattedJarData()
+      .subscribe((jar) => {
+        console.log(jar);
+        this.showBar(+jar.amount);
+      });
+  }
+  ngOnDestroy(): void {
+    console.log('Unsubscribe detected');
+    this.subscription.unsubscribe();
   }
 
   Highcharts = Highcharts;
