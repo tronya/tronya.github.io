@@ -1,6 +1,12 @@
-<div class="text-center">
+<div class="text-center relative">
   @if( jatReq$ | async; as jar) {
-  <h1 class="glitch roboto-bold" attr.data-text="{{ jar.amount }}">
+  <h1
+    class="glitch roboto-bold"
+    attr.data-text="{{ jar.amount }}"
+    [ngStyle]="{
+      filter: filter$ | async
+    }"
+  >
     {{ jar.amount }}
   </h1>
   }

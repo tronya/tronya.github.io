@@ -1,15 +1,19 @@
 <h1>Elevator</h1>
 <p>
-  {{ queue | async | json }}
+  {{ activeFloors }}
+</p>
+
+<p>
+  {{ position | async | json }}
 </p>
 
 <p-selectbutton
   [options]="floorsNumbers"
   (onOptionClick)="clickingFloor($event)"
-  [(ngModel)]="activeFloors"
   [multiple]="true"
   optionLabel="name"
   optionValue="value"
+  [(ngModel)]="activeFloors"
 />
 
 <div class="building bg-black relative">

@@ -6,7 +6,7 @@ import {
 } from 'primeng/selectbutton';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { map, switchMap, tap } from 'rxjs';
+import { map, Observable, switchMap, tap } from 'rxjs';
 
 @Component({
   templateUrl: './elevator.component.html',
@@ -16,21 +16,27 @@ import { map, switchMap, tap } from 'rxjs';
 })
 export class ElevatorComponent {
   private elevator = new Elevator([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-  public activeFloors: (string | number)[] = [];
+  public activeFloors: number[] = [];
+  private margin = 10;
+  private floorHeight = 80;
 
-  public queue = this.elevator.floorQueue.pipe(
-    tap((floors) => {
-      this.activeFloors = floors.map((floor) => floor.floor);
-    })
+  public position = this.elevator.getPosition().pipe(
+    map((floorCount) => floorCount * this.floorHeight - this.floorHeight)
   );
-
-  public position = this.elevator.getPosition();
 
   public floorsNumbers = this.elevator
     .getFloors()
     .map((floor) => ({ name: `Floor ${floor}`, value: floor }));
 
-  constructor() {}
+  constructor() {
+    this.elevator.activeFloors
+      .pipe(
+        tap((res) => {
+          this.activeFloors = res;
+        })
+      )
+      .subscribe();
+  }
 
   public floors() {
     return this.elevator.getFloors();

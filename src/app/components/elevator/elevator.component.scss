@@ -1,12 +1,15 @@
 .elevator {
   transition: 3s;
-  width: 4rem;
+  width: 5rem;
   height: 5rem;
-  left: 50%;
+  opacity: 0.4;
+  display: block;
+  left: 0;
+  right: 0;
+  margin: auto;
 }
 .floor {
-  width: 70px;
-  height: 70px;
-  margin: 10px;
-
+  width: 5rem;
+  height: 5rem;
+  border: 2px solid black;
 }
