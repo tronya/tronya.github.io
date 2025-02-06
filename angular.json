@@ -28,8 +28,14 @@
               "src/assets",
               "src/manifest.webmanifest"
             ],
-            "styles": ["src/styles/index.scss"],
-            "scripts": []
+            "styles": [
+              "src/styles/index.scss",
+              "node_modules/mapbox-gl/dist/mapbox-gl.css",
+              "https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-directions/v4.3.1/mapbox-gl-directions.css"
+            ],
+            "scripts": [
+              "node_modules/@mapbox/mapbox-gl-directions/dist/mapbox-gl-directions.js"
+            ]
           },
           "configurations": {
             "production": {
@@ -74,8 +80,14 @@
               "src/assets",
               "src/manifest.webmanifest"
             ],
-            "styles": ["src/styles.scss"],
-            "scripts": []
+            "styles": [
+              "src/styles.scss",
+              "node_modules/mapbox-gl/dist/mapbox-gl.css",
+              "https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-directions/v4.3.1/mapbox-gl-directions.css"
+            ],
+            "scripts": [
+              "node_modules/@mapbox/mapbox-gl-directions/dist/mapbox-gl-directions.js"
+            ]
           }
         },
         "deploy": {

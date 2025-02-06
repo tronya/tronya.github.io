@@ -8,6 +8,7 @@ import { SvgGrid } from './components/svg-grid/svg-grid.component';
 import { ChartComponent } from './components/chart/chart.component';
 import { StrategyGraphComponent } from './components/strategy-graph/strategy-graph.component';
 import { ElevatorComponent } from './components/elevator/elevator.component';
+import { MapComponent } from './components/map/map.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', component: MonoDash },
@@ -19,4 +20,5 @@ export const routes: Routes = [
   { path: 'chart', component: ChartComponent },
   { path: 'strategy', component: StrategyGraphComponent },
   { path: 'elevator', component: ElevatorComponent },
+  { path: 'map', component: MapComponent },
 ];
