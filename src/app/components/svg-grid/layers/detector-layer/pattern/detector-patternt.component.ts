@@ -10,12 +10,14 @@ export interface DetectorLayerItem {
   start: number;
   end: number;
   row: number;
+  value: number;
+  color: string | null;
 }
 
 @Component({
-    templateUrl: 'detector-patternt.component.html',
-    selector: '[detector-pattern]',
-    imports: [CommonModule]
+  templateUrl: 'detector-patternt.component.html',
+  selector: '[detector-pattern]',
+  imports: [CommonModule],
 })
 export class DetectorPatternComponent {
   public template?: SafeHtml;
@@ -30,7 +32,8 @@ export class DetectorPatternComponent {
       start: layer.start,
       end: layer.end,
       row: layer.row,
-      value: 1,
+      value: layer.value,
+      color: layer.color,
     };
 
     const patternDrawer = new DetectorPatternDrawer(config, layer.pattern);

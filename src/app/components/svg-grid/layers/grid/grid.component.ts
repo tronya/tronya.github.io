@@ -22,7 +22,6 @@ export class GridLayerComponent implements OnInit{
   drawGrif() {
     if(!this.cols || !this.rows) return;
 
-    console.log(this.cols, this.rows)
     const height = Constants.ROW_HEIGHT;
     const width = Constants.COLUMN_WIDTH;
 

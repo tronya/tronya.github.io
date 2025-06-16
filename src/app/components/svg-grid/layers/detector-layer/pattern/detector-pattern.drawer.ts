@@ -7,6 +7,7 @@ export interface Points {
   offsetLeft: number;
   offsetTop: number;
   value: number;
+  color: string | null;
 }
 
 export interface PatternStyles {
@@ -40,14 +41,27 @@ class CoordsBuilder {
   public offsetTop: number = 0;
   public row: number = 0;
   public value: number = 0;
-  constructor({ start, end, row, offsetLeft, offsetTop, value }: Points) {
-    this.x1 = offsetLeft + start * Constants.COLUMN_WIDTH ;
+  public color: string | null = null;
+  constructor({
+    start,
+    end,
+    row,
+    offsetLeft,
+    offsetTop,
+    value,
+    color,
+  }: Points) {
+    this.x1 = offsetLeft + start * Constants.COLUMN_WIDTH;
     this.x2 = offsetLeft + end * Constants.COLUMN_WIDTH;
     this.start = start;
     this.end = end;
     this.bottom = offsetTop + row * Constants.ROW_HEIGHT + Constants.ROW_HEIGHT;
-    this.top = offsetTop + row * Constants.ROW_HEIGHT;
+    this.top =
+      offsetTop +
+      row * Constants.ROW_HEIGHT +
+      Constants.DETECTOR_MAX_BAR_HEIGHT_GAP;
     this.value = value;
+    this.color = color;
   }
 }
 
@@ -63,9 +77,16 @@ export class DetectorPatternDrawer extends CoordsBuilder {
     return {
       x1: this.x1,
       x2: this.x2,
-      bottom: this.bottom,
+      bottom: this.bottom - 1,
       top: this.top,
     };
+  }
+  public rectWidth() {
+    const { x1, x2 } = this.getBounds();
+    return x2 - x1;
+  }
+  public rectHeight() {
+    return Constants.ROW_HEIGHT - Constants.DETECTOR_MAX_BAR_HEIGHT_GAP - 1;
   }
   public getRange(): Range {
     return {
@@ -74,6 +95,7 @@ export class DetectorPatternDrawer extends CoordsBuilder {
     };
   }
   public getBasePath(): string {
-    return `M ${this.x1} ${this.top} L${this.x2} ${this.top} L${this.x2} ${this.bottom} ${this.x1} ${this.bottom}`;
+    const { x1, top, x2, bottom } = this.getBounds();
+    return `M ${x1} ${top} L${x2} ${top} L${x2} ${bottom} L${x1} ${bottom} Z`;
   }
 }

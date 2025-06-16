@@ -9,6 +9,8 @@ import { ChartComponent } from './components/chart/chart.component';
 import { StrategyGraphComponent } from './components/strategy-graph/strategy-graph.component';
 import { ElevatorComponent } from './components/elevator/elevator.component';
 import { MapComponent } from './components/map/map.component';
+import { SiplDiagramComponent } from './components/sipl/sipl-diagram/sipl-diagram.component';
+import { SiplComponent } from './components/sipl/sipl.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', component: MonoDash },
@@ -21,4 +23,5 @@ export const routes: Routes = [
   { path: 'strategy', component: StrategyGraphComponent },
   { path: 'elevator', component: ElevatorComponent },
   { path: 'map', component: MapComponent },
+  { path: 'sipl', component: SiplComponent },
 ];

@@ -1,0 +1,51 @@
+<!-- @for(snaposhot of snapshots$ | async; track snaposhot) {
+<p>{{ snaposhot.tick }}</p>
+} -->
+
+<div class="sipl-diagram" #siplDiagram>
+  <div
+    class="sipl-chart-tab"
+    [ngClass]="{
+      relative: diagramUiService.labelDragAndDropEnabled$ | async,
+      'black-and-white-mode': diagramUiService.blackAndWhiteMode
+    }"
+  >
+    <div
+      class="scroll-cover"
+      [ngClass]="{
+        relative: diagramUiService.labelDragAndDropEnabled$ | async
+      }"
+    >
+      <div
+        [style.width.px]="diagramUiService.preferredWidth | async"
+        [style.height.px]="diagramUiService.preferredHeight | async"
+      >
+        <svg
+          #siplDiagram
+          class="main-chart"
+          version="1.1"
+          xmlns="http://www.w3.org/2000/svg"
+          preserveaspectratio="none"
+          width="100%"
+          height="100%"
+        >
+          <g grid-layer />
+          <g rows-layer />
+          <g row-names-layer />
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Convert Button -->
+<button (click)="convertToPng()">Convert</button>
+
+<!-- Display PNG next to SVG -->
+<img
+  *ngIf="pngDataUrl"
+  [src]="pngDataUrl"
+  alt="Converted PNG"
+  width="200"
+  height="200"
+/>

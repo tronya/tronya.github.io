@@ -7,61 +7,83 @@ const barHeight = (value: number): number => {
     return 0;
   }
 
-  const confinedV: number = Math.max(Math.min(100, value), 0);
-  return (confinedV / 100) * Constants.ROW_HEIGHT;
+  const confinedV: number = Math.max(Math.min(100, value), 15);
+  return (
+    (confinedV / 100) *
+    (Constants.ROW_HEIGHT - Constants.DETECTOR_MAX_BAR_HEIGHT_GAP)
+  );
 };
 
-export const getDetectorPattern = (drawer: DetectorPatternDrawer) => {
-  const bounds = drawer.getBounds();
-  const fullBar = drawer.getBasePath();
-
-  let { x1, x2, bottom, top } = bounds;
-  const rectWidth = Constants.COLUMN_WIDTH - 2;
-  const rectHeight = Constants.ROW_HEIGHT - 2;
-  const dynamicBar = `M${x1} ${
-    top + barHeight(drawer.value)
-  } L${x1} ${bottom}L${x2} ${bottom}L${x2} ${top + barHeight(drawer.value)}`;
-
+export const getDetectorPattern = (drawer: DetectorPatternDrawer): string => {
   switch (drawer.pattern) {
     // Black and white
-    case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_BLUE:
-      return colorPattern(dynamicBar, SiplColors.blue);
-    case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_GREEN:
-      return colorPattern(dynamicBar, SiplColors.green);
-    case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_RED:
-      return colorPattern(dynamicBar, SiplColors.red);
+    case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_COLOR:
+      return colorPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_SOLID:
-      return colorPattern(fullBar, SiplColors.darkBlue);
+      return solidPattern(drawer, SiplColors.darkBlue);
+    case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_BORDERED:
+      return borderedPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_EMPTY:
-      return emptyPatern(bounds, rectWidth, rectHeight);
+      return "";
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_FALING:
-      return falingPattern(bounds, rectWidth, rectHeight);
+      return falingPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_RASING:
-      return rasingPattern(bounds, rectWidth, rectHeight);
+      return rasingPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_VERTICAL:
-      return verticalPattern(bounds, rectWidth, rectHeight);
+      return verticalPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_HORIZONTAL:
-      return horizontalPattern(bounds, rectWidth, rectHeight);
+      return horizontalPattern(drawer);
     case DetectorPossiblePatternsEnum.DETECTOR_PATTERN_GRID:
-      return gridPattern(bounds, rectWidth, rectHeight);
+      return gridPattern(drawer);
     default:
-      return colorPattern(fullBar, SiplColors.black);
+      return colorPattern(drawer);
   }
 };
 
-const colorPattern = (path: string, color: SiplColors) => {
-  return `<path d="${path}" style="fill: ${color}; stroke-width: 1;"></path>`;
+const colorPattern = (drawer: DetectorPatternDrawer): string => {
+  const { x1, x2, top, bottom } = drawer.getBounds();
+  const dynamicValue = barHeight(drawer.value);
+  const barTop =
+    top +
+    (Constants.ROW_HEIGHT -
+      Constants.DETECTOR_MAX_BAR_HEIGHT_GAP -
+      dynamicValue);
+  const path = `M${x1} ${barTop} L${x1} ${bottom}L${x2} ${bottom}L${x2} ${barTop}Z `;
+  return `<path d="${path}" style="fill: ${drawer.color}; stroke-width: 1; stroke:color-mix(in srgb,${drawer.color} 60%, black)"></path>`;
 };
 
-const emptyPatern = (
-  { x1, top }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const solidPattern = (
+  drawer: DetectorPatternDrawer,
+  color: SiplColors
+): string => {
+  const { x1, x2, top, bottom } = drawer.getBounds();
+  const path = `M ${x1} ${top} L${x2} ${top} L${x2} ${bottom} L${x1} ${bottom} Z`;
+  return `<path d="${path}" style="fill: ${color}; stroke-width: 1; stroke:${color};"></path>`;
+};
+
+const borderedPattern = (drawer: DetectorPatternDrawer): string => {
+  const { x1, top } = drawer.getBounds();
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  return `<g>
+    <rect
+     x="${x1}"
+      y="${top}"
+       width="${rectWidth}"
+        height="${rectHeight}"
+         style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
+         ></rect>
+  </g>`;
+};
+
+const emptyPatern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, top } = drawer.getBounds();
   return `<g>
   <rect
-   x="${x1 + 1}"
-    y="${top + 1}"
+   x="${x1}"
+    y="${top}"
      width="${rectWidth}"
       height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
@@ -69,127 +91,130 @@ const emptyPatern = (
 </g>`;
 };
 
-const falingPattern = (
-  { x1, top, x2 }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const falingPattern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, x2, top } = drawer.getBounds();
   let diagonalPath = '';
-  for (let i = 0; i < 5; i++) {
-    diagonalPath += `M ${x1} ${top + i * 5} L${x2} ${top + 5 + i * 5}`;
+  const countOfLines = 3;
+  const lineShift = rectHeight / countOfLines;
+  for (let i = 0; i < countOfLines; i++) {
+    diagonalPath += `M ${x1} ${top + 2 + i * lineShift} L${x2} ${
+      top - 2 + lineShift + i * lineShift
+    }`;
   }
   return `<g>
   <rect
-     x="${x1 + 1}"
-      y="${top + 1}"
+     x="${x1}"
+      y="${top}"
        width="${rectWidth}"
         height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
        ></rect>
-       <path d="${diagonalPath}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
+       <path d="${diagonalPath}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
 </g>`;
 };
 
-const rasingPattern = (
-  { x1, top, x2 }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const rasingPattern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, x2, top } = drawer.getBounds();
   let diagonalPathRevert = '';
-  for (let i = 0; i < 5; i++) {
-    diagonalPathRevert += `M ${x1} ${top + 5 + i * 5} L${x2} ${top + i * 5}`;
+  const countOfLines = 3;
+  const lineShift = rectHeight / countOfLines;
+  for (let i = 0; i < countOfLines; i++) {
+    diagonalPathRevert += `M ${x1} ${
+      top - 2 + lineShift + i * lineShift
+    } L${x2} ${top + 2 + i * lineShift}`;
   }
   return `<g>
   <rect
-     x="${x1 + 1}"
-      y="${top + 1}"
+     x="${x1}"
+      y="${top}"
        width="${rectWidth}"
         height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
        ></rect>
-       <path d="${diagonalPathRevert}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
+       <path d="${diagonalPathRevert}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
 </g>`;
 };
 
-const verticalPattern = (
-  { x1, top, bottom }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const verticalPattern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, top, bottom } = drawer.getBounds();
   let parallel = '';
-  for (let i = 0; i < 3; i++) {
-    parallel += `M ${x1 + i * 3} ${top} L${x1 + i * 3} ${bottom}`;
+  const countOfCells = Math.round(rectWidth / Constants.COLUMN_WIDTH);
+  for (let i = 0; i < countOfCells; i++) {
+    parallel += `M ${
+      x1 + i * Constants.COLUMN_WIDTH + Constants.COLUMN_WIDTH / 2
+    } ${top} L${
+      x1 + i * Constants.COLUMN_WIDTH + Constants.COLUMN_WIDTH / 2
+    } ${bottom}`;
   }
   return `<g>
   <rect
-     x="${x1 + 1}"
-      y="${top + 1}"
+     x="${x1}"
+      y="${top}"
        width="${rectWidth}"
         height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
        ></rect>
-       <path d="${parallel}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
+       <path d="${parallel}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
 </g>`;
 };
 
-const horizontalPattern = (
-  { x1, top, x2 }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const horizontalPattern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, x2, top } = drawer.getBounds();
   let vertical = '';
-  for (let i = 1; i < 5; i++) {
-    let topOffset = top + i * 5;
+  const linesCount = 5;
+  for (let i = 1; i < linesCount; i++) {
+    let topOffset = top + i * (rectHeight / linesCount);
     vertical += `M ${x1} ${topOffset} L${x2} ${topOffset}`;
   }
   return `<g>
   <rect
-     x="${x1 + 1}"
-      y="${top + 1}"
+     x="${x1}"
+      y="${top}"
        width="${rectWidth}"
         height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
        ></rect>
-       <path d="${vertical}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
+       <path d="${vertical}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
 </g>`;
 };
 
-const gridPattern = (
-  { x1, top, x2, bottom }: Bounds,
-  rectWidth: number,
-  rectHeight: number
-) => {
+const gridPattern = (drawer: DetectorPatternDrawer) => {
+  const rectWidth = drawer.rectWidth();
+  const rectHeight = drawer.rectHeight();
+  const { x1, x2, top, bottom } = drawer.getBounds();
+  let horizontalLines = '';
   let verticalLines = '';
-  let parallelLines = '';
-  for (let i = 1; i < 5; i++) {
-    let topOffset = top + i * 5;
-    verticalLines += `M ${x1} ${topOffset} L${x2} ${topOffset}`;
+  const linesCount = 5;
+  const countOfCells = Math.round(rectWidth / Constants.COLUMN_WIDTH);
+  for (let i = 0; i < countOfCells; i++) {
+    verticalLines += `M ${
+      x1 + i * Constants.COLUMN_WIDTH + Constants.COLUMN_WIDTH / 2
+    } ${top} L${
+      x1 + i * Constants.COLUMN_WIDTH + Constants.COLUMN_WIDTH / 2
+    } ${bottom}`;
+  }
+  for (let i = 1; i < linesCount; i++) {
+    let topOffset = top + i * (rectHeight / linesCount);
+    horizontalLines += `M ${x1} ${topOffset} L${x2} ${topOffset}`;
   }
 
-  for (let i = 0; i < 3; i++) {
-    parallelLines += `M ${x1 + i * 3} ${top} L${x1 + i * 3} ${bottom}`;
-  }
   return `<g>
   <rect
-     x="${x1 + 1}"
-      y="${top + 1}"
+     x="${x1}"
+      y="${top}"
        width="${rectWidth}"
         height="${rectHeight}"
        style="stroke: ${SiplColors.darkBlue};stroke-width: 1; fill:white"
        ></rect>
-       <path d="${verticalLines}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
-       <path d="${parallelLines}" style="stroke: ${
-    SiplColors.darkBlue
-  }; stroke-width:1"></path>
+       <path d="${horizontalLines}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
+       <path d="${verticalLines}" style="stroke: ${SiplColors.darkBlue}; stroke-width:1"></path>
 </g>`;
 };
