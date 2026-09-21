@@ -149,6 +149,15 @@ export function terrainHeight(x, z) {
   return (h + mid + rough + small) * flat;
 }
 
+// How thickly loose pebbles lie at a spot, 0..1. Gravel comes in patches a few
+// hundred metres across with clear ground between them, and each patch is itself
+// uneven, so the amount changes as you drive instead of being spread evenly.
+export function pebbleDensity(x, z) {
+  const patch = smooth(0.32, 0.64, fbm(x * 0.0065 + 710, z * 0.0065 - 330, 2));
+  const grain = 0.55 + 1.2 * fbm(x * 0.045 + 40, z * 0.045 + 9, 2);
+  return clamp(0.16 + 0.84 * patch * Math.min(1, grain), 0, 1);
+}
+
 // ---------- rocks: one hash, used by both the physics and the visuals ----------
 
 const STONE_CELL = 13;

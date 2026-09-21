@@ -6,6 +6,7 @@ import { createTerrain, groundHeight, terrainHeight, BASES, ROUTE_HALF, routeZ, 
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
+import { createSand } from './sand.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
@@ -140,6 +141,10 @@ for (const b of BASES) {
 }
 
 const tracks = createTracks();
+const drawSize = new THREE.Vector2();
+const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 } };
+const sand = createSand();
+scene.add(sand.points);
 scene.add(tracks.mesh);
 
 const sim = new VehicleSim();
@@ -269,6 +274,15 @@ for (const side of [-1, 1]) {
   vehicle.root.add(glow);
   glows.push(glow);
 }
+// The roof bar is a long-range spot: a narrow, strong beam that reaches far ahead of
+// the two headlights. It is on with full headlights only.
+const farLight = new THREE.SpotLight(0xfff6e4, 0, 320, 0.11, 0.55, 2);
+farLight.position.set(0, 1.4, 2.0);
+const farAim = new THREE.Object3D();
+farAim.position.set(0, -0.8, 110);
+farLight.target = farAim;
+vehicle.root.add(farLight, farAim);
+
 // The rear had no light of any kind: just a flat red box that read as a dash at
 // night while the nose had two haloes and two beams.
 const tailGlows = [];
@@ -282,18 +296,41 @@ for (const p of vehicle.TAIL_LAMPS) {
   vehicle.root.add(glow);
   tailGlows.push(glow);
 }
-// One light per lamp, not a single one on the centreline, so the glow behind reads
-// as two separate lamps rather than one blob.
+// One lamp per side, and each throws its light backwards. A point light at the tail
+// also lit the ground under the whole body, which read as a red glow from nowhere.
 const tailLights = vehicle.TAIL_LAMPS.map((p) => {
-  const l = new THREE.PointLight(0xff2a10, 0, 7.5, 2);
-  l.position.set(p.x, p.y, p.z - 0.3);
-  vehicle.root.add(l);
+  const l = new THREE.SpotLight(0xff2a10, 0, 10, 0.8, 1, 2);
+  l.position.set(p.x, p.y - 0.1, p.z - 0.15);
+  const aim = new THREE.Object3D();
+  aim.position.set(p.x * 1.4, -1.6, p.z - 9);
+  l.target = aim;
+  vehicle.root.add(l, aim);
   return l;
 });
 
-const cabLight = new THREE.PointLight(0xff9a3c, 0, 7, 2);
-cabLight.position.set(0, 0.95, 1.7);
+// The amber marker strips also spill a little light on the ground at the sides, at
+// night. They are spots aimed outwards: a point light under the sill lit the ground
+// beneath the body too, which read as a glow coming from under the truck.
+const markerLights = [-1, 1].map((side) => {
+  const l = new THREE.SpotLight(0xffa030, 0, 6, 0.6, 1, 2);
+  l.position.set(side * 1.55, -0.2, 0.1);
+  const aim = new THREE.Object3D();
+  aim.position.set(side * 4.2, -1.6, 0.1);
+  l.target = aim;
+  vehicle.root.add(l, aim);
+  return l;
+});
+
+const cabLight = new THREE.PointLight(0xff9a3c, 0, 3, 2);
+cabLight.position.set(0, 1.0, 1.7); // short reach: it lit the ground under the whole body
 vehicle.root.add(cabLight);
+
+function toggleSand() {
+  sand.setEnabled(!sand.enabled);
+  const btn = document.getElementById('sandToggle');
+  btn.textContent = sand.enabled ? 'Камінці: увімк' : 'Камінці: вимк';
+  btn.classList.toggle('on', sand.enabled);
+}
 
 function toggleMap() {
   const hidden = mapEl.classList.toggle('hidden');
@@ -301,27 +338,46 @@ function toggleMap() {
   if (btn) btn.textContent = hidden ? 'Карта: вимк' : 'Карта: увімк';
 }
 
-const LAMP_MODES = ['АВТО', 'УВІМК', 'ВИМК'];
+// L cycles: auto (the default) -> off -> marker lights only -> full headlights.
+// Levels: 0 nothing, 1 marker lights (amber sides, red tail), 2 marker lights + headlights.
+const LAMP_MODES = [
+  { label: 'АВТО', level: null },
+  { label: 'ВИМК', level: 0 },
+  { label: 'ГАБАРИТИ', level: 1 },
+  { label: 'ФАРИ', level: 2 },
+];
 let lampMode = 0;
 function cycleLamps() {
   lampMode = (lampMode + 1) % LAMP_MODES.length;
-  document.getElementById('lamps').textContent = `Фари: ${LAMP_MODES[lampMode]}`;
+  document.getElementById('lamps').textContent = `Світло: ${LAMP_MODES[lampMode].label}`;
   document.getElementById('lamps').classList.toggle('on', lampMode !== 0);
 }
-function lampsWanted() {
-  return lampMode === 1 ? true : lampMode === 2 ? false : daylight < 0.45;
+function lampLevel() {
+  const fixed = LAMP_MODES[lampMode].level;
+  return fixed !== null ? fixed : daylight < 0.45 ? 2 : 0;
 }
 
-function setLamps(on) {
-  for (const g of tailGlows) g.visible = on;
-  for (const l of tailLights) l.visible = on;
+const HEAD_INTENSITY = 2200;
+const FAR_INTENSITY = 14000;
+function setLamps(level) {
+  const marks = level >= 1;
+  const heads = level >= 2;
+  for (const g of tailGlows) g.visible = marks;
+  for (const l of tailLights) l.visible = marks;
+  for (const l of markerLights) l.visible = marks;
   for (const l of headlights) {
-    l.visible = on;
-    l.intensity = on ? 1500 : 0;
+    l.visible = heads;
+    l.intensity = heads ? HEAD_INTENSITY : 0;
   }
-  for (const g of glows) g.visible = on;
-  cabLight.visible = on;
-  cabLight.intensity = on ? 25 : 0;
+  // The nose and roof bars glow as position lights in marker mode, brighter with the beams.
+  for (const g of glows) {
+    g.visible = marks;
+    g.material.opacity = heads ? 1 : 0.4;
+  }
+  cabLight.visible = heads;
+  cabLight.intensity = heads ? 25 : 0;
+  farLight.visible = heads;
+  farLight.intensity = heads ? FAR_INTENSITY : 0;
 }
 
 // ---------- audio ----------
@@ -377,6 +433,7 @@ for (const tab of document.querySelectorAll('#menu .tab')) {
   });
 }
 document.getElementById('mapToggle').addEventListener('click', toggleMap);
+document.getElementById('sandToggle').addEventListener('click', toggleSand);
 
 // ---------- input ----------
 let autopilot = false;
@@ -391,6 +448,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') return resetVehicle();
   if (e.code === 'KeyH') return resetVehicle(true);
   if (e.code === 'KeyM') return toggleMap();
+  if (e.code === 'KeyJ') return toggleSand();
   keys.add(e.code);
   if (DRIVE_KEYS.has(e.code)) {
     setAutopilot(false);
@@ -782,7 +840,7 @@ function frame() {
   // ---------- sol cycle and power ----------
   timeOfDay = (timeOfDay + dt / SOL_SECONDS) % 1;
   applyTimeOfDay(timeOfDay);
-  setLamps(lampsWanted());
+  setLamps(lampLevel());
 
   const target = power.wantPanels ? 1 : 0;
   if (power.panels !== target) {
@@ -864,11 +922,32 @@ function frame() {
   // Tail lamps: dim running light, bright under braking or reversing.
   const braking = clamp(sim.cmd.brake + (sim.cmd.throttle < -0.05 ? 0.7 : 0), 0, 1);
   vehicle.setBrake(braking);
-  const lampsLit = lampsWanted();
+  const lampsLit = lampLevel() >= 1;
   for (const g of tailGlows) g.material.opacity = lampsLit ? 0.35 + 0.65 * braking : 0;
-  for (const l of tailLights) l.intensity = lampsLit ? 2.2 + 8 * braking : 0;
+  for (const l of tailLights) l.intensity = lampsLit ? 14 + 56 * braking : 0;
+  for (const l of markerLights) l.intensity = lampsLit ? 14 : 0;
 
   tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact })));
+
+  // Loose sand: scattered by the wheels, lit by the sun or, at night, by the headlights.
+  const yawNow = sim.yaw();
+  const fx = Math.sin(yawNow);
+  const fz = Math.cos(yawNow);
+  sandCtx.x = sim.pos.x;
+  sandCtx.z = sim.pos.z;
+  sandCtx.yaw = yawNow;
+  sandCtx.vx = sim.vel.x;
+  sandCtx.vz = sim.vel.z;
+  sandCtx.wheels = sim.wheels;
+  sandCtx.daylight = daylight;
+  sandCtx.pxPerUnit = renderer.getDrawingBufferSize(drawSize).y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  sandCtx.head.on = lampLevel() >= 2;
+  sandCtx.head.x = sim.pos.x + fx * 3.6;
+  sandCtx.head.y = sim.pos.y - 0.9;
+  sandCtx.head.z = sim.pos.z + fz * 3.6;
+  sandCtx.head.dx = fx;
+  sandCtx.head.dz = fz;
+  sand.update(dt, sandCtx);
 
   const gustNow = updateDust(dt, t, camera);
   if (audio) {
@@ -902,6 +981,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { sim, camera, controls, power, renderer, scene, terrain, route, drawRoute, auto, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { sim, camera, controls, power, renderer, scene, terrain, route, drawRoute, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();
