@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildVehicle, WHEEL_R, SUSP } from './vehicle.js';
 import { VehicleSim } from './physics.js';
-import { createTerrain, groundHeight, terrainHeight, BASES, ROUTE_HALF, routeZ, corridorWidth } from './terrain.js';
+import {
+  createTerrain, groundHeight, terrainHeight, roadDist, BASES, ROUTE_PTS, ROUTE_BOUNDS, ROUTE_LEN, ROAD_HALF,
+  roadSpawn, roadRemaining,
+} from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
@@ -148,7 +151,10 @@ scene.add(sand.points);
 scene.add(tracks.mesh);
 
 const sim = new VehicleSim();
-sim.reset(BASES[0].x + 40, BASES[0].z, Math.atan2(BASES[1].x - BASES[0].x, BASES[1].z - BASES[0].z));
+{
+  const sp = roadSpawn(false);
+  sim.reset(sp.x, sp.z, sp.yaw);
+}
 const vehicle = buildVehicle();
 scene.add(vehicle.root);
 const W = vehicle.wheels.map((w, i) => ({ ...w, sim: sim.wheels[i], spinAngle: 0, dustAcc: 0 }));
@@ -276,8 +282,32 @@ for (const side of [-1, 1]) {
 }
 // The roof bar is a long-range spot: a narrow, strong beam that reaches far ahead of
 // the two headlights. It is on with full headlights only.
-const farLight = new THREE.SpotLight(0xfff6e4, 0, 320, 0.11, 0.55, 2);
+const farLight = new THREE.SpotLight(0xfff6e4, 0, 320, 0.13, 0, 2);
 farLight.position.set(0, 1.4, 2.0);
+// The bar is a rectangle, so the beam is too: project a soft-edged wide rectangle
+// through the cone instead of the usual round pool.
+{
+  const N = 128;
+  const px = new Uint8Array(N * N * 4);
+  const hw = 0.8; // half-width and half-height inside the [-1, 1] projection square
+  const hh = 0.42;
+  const soft = 0.16;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = Math.abs((x + 0.5) / N * 2 - 1);
+      const v = Math.abs((y + 0.5) / N * 2 - 1);
+      const k = (1 - THREE.MathUtils.smoothstep(u, hw - soft, hw)) * (1 - THREE.MathUtils.smoothstep(v, hh - soft, hh));
+      const o = (y * N + x) * 4;
+      px[o] = px[o + 1] = px[o + 2] = Math.round(255 * k);
+      px[o + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(px, N, N, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  farLight.map = tex;
+}
 const farAim = new THREE.Object3D();
 farAim.position.set(0, -0.8, 110);
 farLight.target = farAim;
@@ -358,7 +388,7 @@ function lampLevel() {
 }
 
 const HEAD_INTENSITY = 2200;
-const FAR_INTENSITY = 14000;
+const FAR_INTENSITY = 20000;
 function setLamps(level) {
   const marks = level >= 1;
   const heads = level >= 2;
@@ -458,9 +488,32 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 
+// ---------- odometer ----------
+const odo = { trip: 0, total: 0, last: null, savedAt: 0 };
+try { odo.total = Number(localStorage.getItem('rover.odo')) || 0; } catch (e) { /* storage may be blocked */ }
+const hudOdoTrip = document.getElementById('odoTrip');
+const hudOdoTotal = document.getElementById('odoTotal');
+const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
+document.getElementById('odoRow').addEventListener('click', () => { odo.trip = 0; });
+function stepOdometer(t) {
+  if (odo.last) {
+    const d = Math.hypot(sim.pos.x - odo.last.x, sim.pos.z - odo.last.z);
+    if (d < 30) { odo.trip += d; odo.total += d; } // a bigger jump is a teleport, not driving
+  }
+  odo.last = { x: sim.pos.x, z: sim.pos.z };
+  hudOdoTrip.textContent = fmtDist(odo.trip);
+  hudOdoTotal.textContent = fmtDist(odo.total);
+  if (t > odo.savedAt) {
+    odo.savedAt = t + 3;
+    try { localStorage.setItem('rover.odo', String(Math.round(odo.total))); } catch (e) { /* ignore */ }
+  }
+}
+
 // ---------- the crossing ----------
 const trip = { target: BASES[1], docked: false, legs: 0, best: Infinity };
 const hudNavDist = () => document.getElementById('navDist');
+const hudNavRoad = document.getElementById('navRoad');
+let roadNavAt = 0;
 
 function distanceTo(b) {
   return Math.hypot(sim.pos.x - b.x, sim.pos.z - b.z);
@@ -544,7 +597,9 @@ function stepRighting(dt) {
 function resetVehicle(home = false) {
   if (home) {
     const b = trip.target === BASES[1] ? BASES[0] : BASES[1];
-    sim.reset(b.x + 40, b.z, Math.atan2(trip.target.x - b.x, trip.target.z - b.z));
+    const sp = roadSpawn(b === BASES[1]);
+    sim.reset(sp.x, sp.z, sp.yaw);
+    odo.last = null;
     terrain.prime(sim.pos.x, sim.pos.z);
     tracks.clear();
   } else {
@@ -556,61 +611,81 @@ function resetVehicle(home = false) {
 // ---------- route map: the whole crossing, not the ground nearby ----------
 const mapEl = document.getElementById('map');
 const mapMarker = document.getElementById('mapMarker');
-const MAP_PAD = 700;
-const mapBox = { x0: -ROUTE_HALF - MAP_PAD, x1: ROUTE_HALF + MAP_PAD, z0: 0, z1: 0 };
+const MAP_PAD_X = 520;
+const MAP_PAD_Z = 420;
+const mapBox = {
+  x0: ROUTE_BOUNDS.x0 - MAP_PAD_X, x1: ROUTE_BOUNDS.x1 + MAP_PAD_X,
+  z0: ROUTE_BOUNDS.z0 - MAP_PAD_Z, z1: ROUTE_BOUNDS.z1 + MAP_PAD_Z,
+};
 (function buildRouteMap() {
-  let zMin = Infinity;
-  let zMax = -Infinity;
-  for (let x = -ROUTE_HALF; x <= ROUTE_HALF; x += 40) {
-    const w = corridorWidth(x);
-    zMin = Math.min(zMin, routeZ(x) - w);
-    zMax = Math.max(zMax, routeZ(x) + w);
-  }
-  mapBox.z0 = zMin - MAP_PAD * 0.5;
-  mapBox.z1 = zMax + MAP_PAD * 0.5;
-
   const W = 760;
-  const H = Math.max(90, Math.round((W * (mapBox.z1 - mapBox.z0)) / (mapBox.x1 - mapBox.x0)));
+  const H = Math.round((W * (mapBox.z1 - mapBox.z0)) / (mapBox.x1 - mapBox.x0));
   const canvas = document.getElementById('mapCanvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'rgba(28,14,9,0.55)';
-  ctx.fillRect(0, 0, W, H);
 
   const sx = (x) => ((x - mapBox.x0) / (mapBox.x1 - mapBox.x0)) * W;
   const sz = (z) => ((z - mapBox.z0) / (mapBox.z1 - mapBox.z0)) * H;
+  const wx = (px) => mapBox.x0 + (px / W) * (mapBox.x1 - mapBox.x0);
+  const wz = (py) => mapBox.z0 + (py / H) * (mapBox.z1 - mapBox.z0);
 
-  // The drivable corridor
+  // Ground: pale near the road, darkening into the rough country and the ridges.
+  const B = 5;
+  for (let py = 0; py < H; py += B) {
+    for (let px = 0; px < W; px += B) {
+      const mx = wx(px + B / 2);
+      const mz = wz(py + B / 2);
+      const d = roadDist(mx, mz);
+      const rough = Math.min(1, Math.max(0, (d - ROAD_HALF) / 500));
+      const ridge = Math.min(1, Math.max(0, (d - 1500) / 260));
+      // Height shows as brightness, so the mountains read on the map.
+      const hi = Math.min(1, Math.max(0, terrainHeight(mx, mz) / 190));
+      const r = 92 - 42 * rough - 40 * ridge + 120 * hi;
+      const g = 50 - 24 * rough - 24 * ridge + 80 * hi;
+      const bl = 33 - 15 * rough - 15 * ridge + 55 * hi;
+      ctx.fillStyle = `rgb(${r | 0},${g | 0},${bl | 0})`;
+      ctx.fillRect(px, py, B, B);
+    }
+  }
+
+  // The straight line between the bases: shorter, but across the rough ground.
   ctx.beginPath();
-  for (let x = -ROUTE_HALF; x <= ROUTE_HALF; x += 25) ctx.lineTo(sx(x), sz(routeZ(x) - corridorWidth(x)));
-  for (let x = ROUTE_HALF; x >= -ROUTE_HALF; x -= 25) ctx.lineTo(sx(x), sz(routeZ(x) + corridorWidth(x)));
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(196,120,72,0.5)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,190,140,0.55)';
-  ctx.lineWidth = 1;
+  ctx.moveTo(sx(BASES[0].x), sz(BASES[0].z));
+  ctx.lineTo(sx(BASES[1].x), sz(BASES[1].z));
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([2, 7]);
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  // Centre line
+  // The road
   ctx.beginPath();
-  for (let x = -ROUTE_HALF; x <= ROUTE_HALF; x += 25) ctx.lineTo(sx(x), sz(routeZ(x)));
-  ctx.strokeStyle = 'rgba(255,220,180,0.35)';
-  ctx.setLineDash([5, 5]);
+  ROUTE_PTS.forEach((p, i) => (i ? ctx.lineTo(sx(p.x), sz(p.z)) : ctx.moveTo(sx(p.x), sz(p.z))));
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(232,170,116,0.95)';
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,232,204,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 6]);
   ctx.stroke();
   ctx.setLineDash([]);
 
   for (const b of BASES) {
     ctx.fillStyle = '#4fe0ff';
     ctx.beginPath();
-    ctx.arc(sx(b.x), sz(b.z), 4.5, 0, Math.PI * 2);
+    ctx.arc(sx(b.x), sz(b.z), 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#ffe9d6';
-    ctx.font = 'bold 11px ui-monospace, monospace';
-    ctx.textAlign = b.x < 0 ? 'left' : 'right';
-    ctx.fillText(b.name, sx(b.x) + (b.x < 0 ? 8 : -8), sz(b.z) + 4);
+    ctx.font = 'bold 13px ui-monospace, monospace';
+    const right = b.x > (mapBox.x0 + mapBox.x1) / 2;
+    ctx.textAlign = right ? 'right' : 'left';
+    ctx.fillText(b.name, sx(b.x) + (right ? -11 : 11), sz(b.z) + 5);
   }
   document.getElementById('mapView').style.aspectRatio = `${W} / ${H}`;
+  document.getElementById('map').style.setProperty('--aspect', String(W / H));
   const rc = document.getElementById('routeCanvas');
   rc.width = W;
   rc.height = H;
@@ -661,7 +736,7 @@ function drawRoute() {
 }
 
 mapEl.addEventListener('click', (e) => {
-  if (e.target.closest('#mapBar')) return;
+  if (e.target.closest('#mapBar') || e.target.closest('#mapClose')) return;
   // First click opens the map; once open, clicks drop waypoints.
   if (!mapEl.classList.contains('big')) {
     mapEl.classList.add('big');
@@ -680,7 +755,7 @@ mapEl.addEventListener('click', (e) => {
     flash('Маршрут задано — автопілот увімкнено');
   }
 });
-document.getElementById('mapCollapse').addEventListener('click', () => mapEl.classList.remove('big'));
+document.getElementById('mapClose').addEventListener('click', () => mapEl.classList.remove('big'));
 document.getElementById('routeClear').addEventListener('click', () => {
   route.length = 0;
   drawRoute();
@@ -878,6 +953,7 @@ function frame() {
     flashUntil = 0;
   }
 
+  stepOdometer(t);
   // ---------- navigation ----------
   if (route.length && Math.hypot(sim.pos.x - route[0].x, sim.pos.z - route[0].z) < WAYPOINT_R) {
     route.shift();
@@ -906,6 +982,11 @@ function frame() {
   document.getElementById('navName').textContent = trip.target.name;
   document.getElementById('navDist').textContent =
     dist > 1500 ? `${(dist / 1000).toFixed(2)} км` : `${Math.round(dist)} м`;
+  if (t > roadNavAt) {
+    roadNavAt = t + 0.5;
+    const rem = roadRemaining(sim.pos.x, sim.pos.z, trip.target === BASES[1]);
+    hudNavRoad.textContent = `по дорозі ${rem > 1500 ? (rem / 1000).toFixed(1) + ' км' : Math.round(rem) + ' м'}`;
+  }
   document.getElementById('navBar').style.width = `${clamp(100 * (1 - dist / legTotal), 0, 100)}%`;
 
   // Beacons pulse; the one you are heading for pulses harder and brighter.

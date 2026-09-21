@@ -42,34 +42,161 @@ const smooth = (a, b, x) => {
 };
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
-// ---------- the route ----------
+// ---------- the route: a graded road shaped like the letter S ----------
 
-export const ROUTE_HALF = 4900;
+// A stretched, wandering S: a rough zigzag through control points, smoothed with a
+// Catmull-Rom spline and pushed about by low-frequency noise so it never looks like a
+// compass-drawn letter. It is ~10 km long while the bases sit ~5.5 km apart, so cutting
+// across is much shorter but crosses rough, rocky ground instead of the road.
+export const ROAD_HALF = 34; // half-width of the graded strip
+const WALL_START = 1650; // farther than this from the road, ridges close the world in
+const ROUTE_SCALE = 0.8; // tunes the overall length
+const ROUTE_CONTROL = [
+  [1650, -2900], [900, -3250], [-250, -3050], [-1150, -2450], [-1500, -1500], [-1100, -650],
+  [-200, -80], [700, 350], [1350, 1000], [1500, 1900], [900, 2650], [-100, 2950], [-1050, 2850], [-1750, 2400],
+];
 
-// The corridor snakes, so the drive is longer than the straight line between bases.
-export function routeZ(x) {
-  const t = clamp(x / ROUTE_HALF, -1.15, 1.15);
-  return Math.sin(t * 2.3) * 780 + Math.sin(t * 5.7 + 1.2) * 260 + t * 900;
-}
-
-// Half-width of the drivable corridor; it pinches and opens out along the way.
-export function corridorWidth(x) {
-  return 560 + 250 * Math.sin(x * 0.00043 + 2.0) + 130 * Math.sin(x * 0.00117 + 0.4);
-}
+export const ROUTE_PTS = (() => {
+  const c = ROUTE_CONTROL.map(([x, z]) => [x * ROUTE_SCALE, z * ROUTE_SCALE]);
+  const pts = [];
+  const at = (i) => c[Math.min(c.length - 1, Math.max(0, i))];
+  for (let i = 0; i < c.length - 1; i++) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    const n = Math.max(4, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 24));
+    for (let k = 0; k < n; k++) {
+      const t = k / n;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const q = (a0, a1, a2, a3) =>
+        0.5 * (2 * a1 + (-a0 + a2) * t + (2 * a0 - 5 * a1 + 4 * a2 - a3) * t2 + (-a0 + 3 * a1 - 3 * a2 + a3) * t3);
+      pts.push({ x: q(p0[0], p1[0], p2[0], p3[0]), z: q(p0[1], p1[1], p2[1], p3[1]) });
+    }
+  }
+  pts.push({ x: c[c.length - 1][0], z: c[c.length - 1][1] });
+  // Wander a little, but keep both ends where they are.
+  const last = pts.length - 1;
+  pts.forEach((p, i) => {
+    const fade = Math.min(1, Math.min(i, last - i) / 12);
+    p.x += (fbm(p.x * 0.0011 + 40, p.z * 0.0011 + 3, 2) - 0.5) * 300 * fade;
+    p.z += (fbm(p.x * 0.0011 - 20, p.z * 0.0011 + 70, 2) - 0.5) * 300 * fade;
+  });
+  let s = 0;
+  pts[0].s = 0;
+  for (let i = 1; i < pts.length; i++) {
+    s += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    pts[i].s = s;
+  }
+  return pts;
+})();
+export const ROUTE_LEN = ROUTE_PTS[ROUTE_PTS.length - 1].s;
 
 export const BASES = [
-  { name: 'АЛЬФА', x: -ROUTE_HALF, z: routeZ(-ROUTE_HALF) },
-  { name: 'БЕТА', x: ROUTE_HALF, z: routeZ(ROUTE_HALF) },
+  { name: 'АЛЬФА', x: ROUTE_PTS[0].x, z: ROUTE_PTS[0].z },
+  { name: 'БЕТА', x: ROUTE_PTS[ROUTE_PTS.length - 1].x, z: ROUTE_PTS[ROUTE_PTS.length - 1].z },
 ];
 export const BASE_FLAT_R = 95;
 
-// How far outside the corridor a point is: 0 inside, 1 in the ridges that wall it in.
+export const ROUTE_BOUNDS = (() => {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const p of ROUTE_PTS) {
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+    z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z);
+  }
+  return { x0, x1, z0, z1 };
+})();
+
+// Distance to the road, from a coarse field built once. Bilinear lookups are far
+// cheaper than searching the polyline, and terrainHeight asks for this constantly.
+const FSTEP = 25;
+const FMARGIN = 2000;
+const FIELD = (() => {
+  const { x0, x1, z0, z1 } = ROUTE_BOUNDS;
+  const fx0 = x0 - FMARGIN;
+  const fz0 = z0 - FMARGIN;
+  const nx = Math.ceil((x1 - x0 + 2 * FMARGIN) / FSTEP) + 2;
+  const nz = Math.ceil((z1 - z0 + 2 * FMARGIN) / FSTEP) + 2;
+  const d = new Float32Array(nx * nz);
+  const n = ROUTE_PTS.length;
+  for (let j = 0; j < nz; j++) {
+    const pz = fz0 + j * FSTEP;
+    for (let i = 0; i < nx; i++) {
+      const px = fx0 + i * FSTEP;
+      // Nearest vertex first; the nearest point on the line is on one of its two segments.
+      let bi = 0;
+      let bd = Infinity;
+      for (let k = 0; k < n; k++) {
+        const dx = px - ROUTE_PTS[k].x;
+        const dz = pz - ROUTE_PTS[k].z;
+        const dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; bi = k; }
+      }
+      let best = bd;
+      for (const k of [bi - 1, bi]) {
+        if (k < 0 || k >= n - 1) continue;
+        const a = ROUTE_PTS[k];
+        const b = ROUTE_PTS[k + 1];
+        const ex = b.x - a.x;
+        const ez = b.z - a.z;
+        const t = clamp(((px - a.x) * ex + (pz - a.z) * ez) / (ex * ex + ez * ez), 0, 1);
+        const dx = px - (a.x + ex * t);
+        const dz = pz - (a.z + ez * t);
+        best = Math.min(best, dx * dx + dz * dz);
+      }
+      d[j * nx + i] = Math.sqrt(best);
+    }
+  }
+  return { x0: fx0, z0: fz0, nx, nz, d };
+})();
+
+export function roadDist(x, z) {
+  const fx = clamp((x - FIELD.x0) / FSTEP, 0, FIELD.nx - 1.001);
+  const fz = clamp((z - FIELD.z0) / FSTEP, 0, FIELD.nz - 1.001);
+  const i = Math.floor(fx);
+  const j = Math.floor(fz);
+  const u = fx - i;
+  const v = fz - j;
+  const o = j * FIELD.nx + i;
+  const d = FIELD.d;
+  return d[o] * (1 - u) * (1 - v) + d[o + 1] * u * (1 - v) + d[o + FIELD.nx] * (1 - u) * v + d[o + FIELD.nx + 1] * u * v;
+}
+
+// Index of the route vertex closest to a point.
+export function nearestRouteIndex(x, z) {
+  let bi = 0;
+  let bd = Infinity;
+  for (let k = 0; k < ROUTE_PTS.length; k++) {
+    const dx = x - ROUTE_PTS[k].x;
+    const dz = z - ROUTE_PTS[k].z;
+    const dd = dx * dx + dz * dz;
+    if (dd < bd) { bd = dd; bi = k; }
+  }
+  return bi;
+}
+
+// Where to put the rover at a base and which way the road leaves it.
+export function roadSpawn(atEnd) {
+  const from = atEnd ? ROUTE_PTS.length - 1 : 0;
+  const dir = atEnd ? -1 : 1;
+  const k = clamp(from + dir * 2, 0, ROUTE_PTS.length - 1);
+  const p = ROUTE_PTS[from + dir * 2];
+  const q = ROUTE_PTS[clamp(k + dir, 0, ROUTE_PTS.length - 1)];
+  return { x: p.x, z: p.z, yaw: Math.atan2(q.x - p.x, q.z - p.z) };
+}
+
+// Metres left along the road from where you are to one end, plus the detour to reach it.
+export function roadRemaining(x, z, toEnd) {
+  const k = nearestRouteIndex(x, z);
+  const along = toEnd ? ROUTE_LEN - ROUTE_PTS[k].s : ROUTE_PTS[k].s;
+  return along + Math.hypot(x - ROUTE_PTS[k].x, z - ROUTE_PTS[k].z);
+}
+
+// Ridges that close the world in far from the road.
 function wallAmount(x, z) {
-  const w = corridorWidth(x);
-  const off = Math.abs(z - routeZ(x)) + (fbm(x * 0.0016 + 11, z * 0.0016 + 5, 2) - 0.5) * 170;
-  const side = smooth(w, w + 150, off);
-  const ends = smooth(ROUTE_HALF + 60, ROUTE_HALF + 420, Math.abs(x));
-  return Math.max(side, ends);
+  const off = roadDist(x, z) + (fbm(x * 0.0016 + 11, z * 0.0016 + 5, 2) - 0.5) * 170;
+  return smooth(WALL_START, WALL_START + 240, off);
 }
 
 // Flat apron around each base so the habitat sits level and you can park.
@@ -81,17 +208,27 @@ function baseFlatten(x, z) {
   return k;
 }
 
-// Shallow craters scattered along the corridor.
+// Craters lie beside the road, never on it, and get more frequent the farther you go.
 const CRATERS = (() => {
   const list = [];
-  for (let i = 0; i < 46; i++) {
+  const n = ROUTE_PTS.length;
+  for (let i = 0; i < 150; i++) {
     const r1 = hash(i * 3 + 1, 7);
     const r2 = hash(i * 5 + 2, 13);
     const r3 = hash(i * 7 + 3, 29);
-    const x = (r1 * 2 - 1) * ROUTE_HALF * 0.97;
-    const z = routeZ(x) + (r2 * 2 - 1) * corridorWidth(x) * 0.72;
-    const R = 14 + r3 * 30;
-    if (BASES.some((b) => Math.hypot(x - b.x, z - b.z) < BASE_FLAT_R + R + 40)) continue;
+    const r4 = hash(i * 11 + 5, 41);
+    const k = 1 + Math.floor(r1 * (n - 3));
+    const a = ROUTE_PTS[k - 1];
+    const b = ROUTE_PTS[k + 1];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const nx = -(b.z - a.z) / len;
+    const nz = (b.x - a.x) / len;
+    const R = 14 + r3 * 34;
+    const off = (r2 < 0.5 ? -1 : 1) * (ROAD_HALF + R + 30 + r4 * 900);
+    const x = ROUTE_PTS[k].x + nx * off;
+    const z = ROUTE_PTS[k].z + nz * off;
+    if (roadDist(x, z) < ROAD_HALF + R + 20) continue;
+    if (BASES.some((bs) => Math.hypot(x - bs.x, z - bs.z) < BASE_FLAT_R + R + 40)) continue;
     list.push({ x, z, R });
   }
   return list;
@@ -124,29 +261,43 @@ function craterHeight(x, z) {
   return h;
 }
 
-// An open plain inside the corridor, walled by ridges outside it.
+// A graded road across rough country: gentle along the road, hilly, cratered and
+// strewn with boulders once you leave it.
 export function terrainHeight(x, z) {
+  const rd = roadDist(x, z);
+  const rough = smooth(ROAD_HALF + 14, ROAD_HALF + 170, rd); // 0 on the road, 1 out in the rough
   const wx = x + (fbm(x * 0.02 + 11, z * 0.02 + 3, 2) - 0.5) * 26;
   const wz = z + (fbm(x * 0.02 - 7, z * 0.02 + 29, 2) - 0.5) * 26;
 
-  let h = (fbm(wx * 0.009 + 5, wz * 0.009 + 9, 3) - 0.46) * 9;
-  h += (fbm(wx * 0.026 + 60, wz * 0.026 - 18, 2) - 0.46) * 2.4;
+  let h = (fbm(wx * 0.009 + 5, wz * 0.009 + 9, 3) - 0.46) * 9 * (0.3 + 2.5 * rough);
+  h += (fbm(wx * 0.026 + 60, wz * 0.026 - 18, 2) - 0.46) * 2.4 * (0.3 + 3.0 * rough);
 
   const duneZone = smooth(0.44, 0.6, fbm(wx * 0.012 + 200, wz * 0.012 + 90, 2));
   if (duneZone > 0) {
     const ph = (wx * 0.7 + wz * 0.4) * 0.16 + (fbm(wx * 0.03, wz * 0.03, 2) - 0.44) * 5;
-    h += duneZone * 1.15 * 0.5 * (Math.sin(ph) + 0.5 * Math.sin(2 * ph + 0.6));
+    h += duneZone * 1.15 * 0.5 * (Math.sin(ph) + 0.5 * Math.sin(2 * ph + 0.6)) * (0.4 + 1.2 * rough);
   }
   h += craterHeight(x, z);
+
+  // Real mountains, kept off the road: the road threads the valleys between them, so
+  // cutting across means climbing. The foothills start ~70 m from the road.
+  const away = smooth(60, 340, rd);
+  if (away > 0) {
+    const range = smooth(0.4, 0.64, fbm(wx * 0.00085 + 120, wz * 0.00085 - 60, 4));
+    if (range > 0) {
+      const ridge = 1 - Math.abs(fbm(wx * 0.0013 + 7, wz * 0.0013 + 81, 3) * 2 - 1);
+      h += away * range * (60 + 110 * ridge * ridge + 40 * fbm(wx * 0.005 + 3, wz * 0.005 + 44, 3));
+    }
+  }
 
   const wall = wallAmount(x, z);
   if (wall > 0) h += wall * (34 + 62 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
 
   const flat = baseFlatten(x, z);
-  const mid = (fbm(x * 0.06, z * 0.06, 3) - 0.44) * 0.9;
-  const rough = (fbm(x * 0.18 + 9, z * 0.18 + 4, 2) - 0.44) * 0.3;
+  const mid = (fbm(x * 0.06, z * 0.06, 3) - 0.44) * 0.9 * (0.5 + 1.2 * rough);
+  const bumpy = (fbm(x * 0.18 + 9, z * 0.18 + 4, 2) - 0.44) * 0.3 * (0.5 + 2.4 * rough);
   const small = (vnoise(x * 0.35, z * 0.35) - 0.5) * 0.12;
-  return (h + mid + rough + small) * flat;
+  return (h + mid + bumpy + small) * flat;
 }
 
 // How thickly loose pebbles lie at a spot, 0..1. Gravel comes in patches a few
@@ -169,11 +320,13 @@ function stoneInCell(ci, cj) {
   const x = (ci + 0.15 + 0.7 * hash(ci + 31, cj + 17)) * STONE_CELL;
   const z = (cj + 0.15 + 0.7 * hash(ci + 7, cj + 53)) * STONE_CELL;
   // Rocks clump into fields, leaving clear lanes between them.
-  const density = 0.12 + 0.72 * smooth(0.42, 0.62, fbm(x * 0.0055 + 300, z * 0.0055 - 60, 2));
+  // Sparse and small on the road, dense with big boulders off it.
+  const rough = smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
+  const density = Math.min(0.95, (0.12 + 0.72 * smooth(0.42, 0.62, fbm(x * 0.0055 + 300, z * 0.0055 - 60, 2))) * (0.22 + 1.5 * rough));
   if (a > density) return false;
   if (baseFlatten(x, z) < 0.999) return false;
   const b = hash(ci + 91, cj + 3);
-  const big = b > 0.88;
+  const big = b > 0.97 - 0.13 * rough;
   const r = big ? 1.3 + b * 2.2 : 0.35 + b * 1.15;
   stone.x = x;
   stone.z = z;
@@ -292,6 +445,7 @@ const rockCol = new THREE.Color(0x5b3326);
 const strata = new THREE.Color(0xb46f45);
 const pale = new THREE.Color(0xd9b189);
 const rust = new THREE.Color(0x7d3a22);
+const roadCol = new THREE.Color(0xcf9666);
 const _c = new THREE.Color();
 
 // Heights for the tile plus a one-cell margin. computeVertexNormals() only sees the
@@ -354,6 +508,9 @@ function fillTile(geo, ox, oz, seg) {
     const patch = fbm(x * 0.008 - 210, z * 0.008 + 77, 2);
     _c.copy(dark).lerp(base, smooth(0.25, 0.6, a)).lerp(dust, smooth(0.5, 0.85, m) * 0.55);
     _c.lerp(pale, smooth(0.46, 0.74, macro) * 0.5).lerp(rust, smooth(0.48, 0.72, patch) * 0.32);
+    // The graded road is paler, packed dust; off it the ground is darker and rockier.
+    const onRoad = 1 - smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
+    _c.lerp(roadCol, onRoad * 0.6);
     const steep = smooth(0.06, 0.4, 1 - normal.getY(k));
     if (steep > 0) {
       const band = Math.sin(pos.getY(k) * 1.7 + a * 10) * 0.5 + 0.5;

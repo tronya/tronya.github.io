@@ -70,13 +70,14 @@
     #navArrow { font-size: 26px; color: #4fe0ff; line-height: 1; transition: transform 0.08s linear; }
     #nav b { font-size: 14px; letter-spacing: 0.12em; }
     #navDist { font-size: 15px; opacity: 0.9; margin-top: 2px; }
+    #navRoad { font-size: 11px; opacity: 0.65; margin-top: 1px; }
     .navGauge { margin-top: 8px; }
     .navGauge i { background: #4fe0ff; }
-    #map { width: 190px; overflow: hidden; border-radius: 6px; color: #fbeee0;
+    #map { width: min(190px, calc((100vh - 380px) * var(--aspect, 2))); overflow: hidden; border-radius: 6px; color: #fbeee0;
       border: 1px solid rgba(255, 210, 170, 0.45); background: rgba(40, 18, 10, 0.55);
       cursor: pointer; transition: width 0.18s ease; }
     #map.hidden { display: none; }
-    #leftCol > #map.big { position: fixed; width: min(78vw, 1020px); left: 50%; transform: translateX(-50%); top: 96px;
+    #leftCol > #map.big { min-width: 320px; position: fixed; width: min(78vw, 1020px, calc((100vh - 270px) * var(--aspect, 2))); left: 50%; transform: translateX(-50%); top: 96px;
       border-color: rgba(79, 208, 255, 0.6); cursor: crosshair; }
     /* The absolutely positioned overlay and marker need a positioned parent of their own.
        #map is static inside the column, so without this they anchored to the whole
@@ -84,13 +85,18 @@
     #mapView { position: relative; width: 100%; }
     #mapCanvas, #routeCanvas { width: 100%; height: 100%; display: block; }
     #routeCanvas { position: absolute; inset: 0; }
-    #mapBar { display: none; gap: 10px;
+    #mapBar { display: none; gap: 6px 10px; flex-wrap: wrap;
       align-items: center; justify-content: space-between; padding: 7px 10px; font-size: 11px;
       background: rgba(28, 13, 8, 0.82); border-top: 1px solid rgba(255, 210, 170, 0.28); }
     #map.big #mapBar { display: flex; }
+    #routeInfo { flex: 1 1 100%; }
     .mapBtns { display: flex; gap: 6px; }
     #mapBar button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 210, 170, 0.32);
       color: inherit; font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 4px; cursor: pointer; }
+    #mapClose { display: none; position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; padding: 0;
+      background: rgba(28, 13, 8, 0.78); border: 1px solid rgba(255, 210, 170, 0.32); border-radius: 50%;
+      color: inherit; font: inherit; font-size: 17px; line-height: 1; cursor: pointer; }
+    #map.big #mapClose { display: block; }
     #mapMarker { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
       border-bottom: 14px solid #4fe0ff; filter: drop-shadow(0 0 2px #000); }
     body.night #mapCanvas { filter: brightness(0.6); }
@@ -113,9 +119,9 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.30 · дальній прожектор на даху</span></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.36 · більше гір</span></div>
     <div id="nav" class="panel">
-    <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div></div></div>
+    <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div><div id="navRoad"></div></div></div>
     <div class="gauge navGauge"><i id="navBar"></i></div>
   </div>
     <div id="map">
@@ -123,10 +129,11 @@
       <canvas id="mapCanvas"></canvas>
       <canvas id="routeCanvas"></canvas>
       <div id="mapMarker"></div>
+      <button id="mapClose" title="Закрити">&times;</button>
     </div>
     <div id="mapBar">
       <span id="routeInfo">Маршрут порожній — клацай, щоб ставити точки</span>
-      <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button><button id="mapCollapse">Згорнути</button></span>
+      <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button></span>
     </div>
   </div>
   </div>
@@ -146,6 +153,8 @@
     <div class="row"><span>БАТАРЕЯ</span><b id="battery">100%</b></div>
     <div class="gauge"><i id="batteryBar"></i></div>
     <div class="row"><span id="panelState">КРИЛА: СКЛАДЕНІ</span><b id="powerFlow">0.00 %/с</b></div>
+    <div class="row" id="odoRow" title="Клац — обнулити поїздку"><span>ПОЇЗДКА</span><b id="odoTrip">0 м</b></div>
+    <div class="row sol"><span>ПРОБІГ ВСЬОГО</span><b id="odoTotal">0 м</b></div>
     <div class="row sol"><span>СОЛ</span><b id="clock">00:00</b></div>
   </div>
   <div id="warn" class="panel"></div>

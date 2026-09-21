@@ -25,6 +25,7 @@ const KICK_MAX_SIZE = 0.27;
 const DENSITY_SCALE = 0.5; // thins the whole field out; pebbleDensity still shapes it
 
 const RESPAWN_BUDGET = 500; // per frame, so a teleport does not stall a frame
+const JITTER = 24; // how far a wrapped rock is scattered from its mirror spot
 
 // Only Martian earth tones: rust, sandstone, dusty orange and dark basalt-brown.
 // Nothing near white or grey, whichever way the light falls.
@@ -49,7 +50,7 @@ function makeChunkGeometry() {
   return geo;
 }
 
-export function createSand({ count = 1500, radius = 46 } = {}) {
+export function createSand({ count = 2800, radius = 120 } = {}) {
   const pos = new Float32Array(count * 3);
   const vel = new Float32Array(count * 3);
   const rot = new Float32Array(count * 3); // Euler angles
@@ -74,7 +75,7 @@ export function createSand({ count = 1500, radius = 46 } = {}) {
         `#include <begin_vertex>
          #ifdef USE_INSTANCING
            vec3 instP = vec3(instanceMatrix[3]);
-           transformed *= smoothstep(uRadius, uRadius * 0.74, length(instP.xz - uRover.xz));
+           transformed *= smoothstep(uRadius, uRadius * 0.86, length(instP.xz - uRover.xz));
          #endif`
       );
   };
@@ -257,7 +258,7 @@ export function createSand({ count = 1500, radius = 46 } = {}) {
           const k = Math.min(0.985, (radius * 0.985) / Math.sqrt(d2));
           // Jitter widely: the field changes from place to place, so the new spot
           // should be judged on its own ground rather than copied from the far side.
-          place(i, ctx.x - rx * k + (Math.random() - 0.5) * 12, ctx.z - rz * k + (Math.random() - 0.5) * 12);
+          place(i, ctx.x - rx * k + (Math.random() - 0.5) * JITTER, ctx.z - rz * k + (Math.random() - 0.5) * JITTER);
         }
       }
     }
