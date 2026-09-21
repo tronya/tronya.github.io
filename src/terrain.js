@@ -382,6 +382,9 @@ export function surfaceHeight(x, z) {
 const TILE = 220;
 const GRID = 7; // tiles across, centred on the rover
 const SEG = 48; // uniform, so a tile keeps its geometry as the window scrolls
+const SHADOW_REACH = 60; // rocks this close cast shadows
+const BEAM_REACH = 260; // and rocks this far along the long-range spotlight
+const BEAM_HALF_WIDTH = 45;
 const ROCK_DIST = 430; // rocks are drawn this far out; fog hides the rest
 export const MESH_STEP = 220 / 48; // TILE / SEG, the spacing of terrain vertices
 const TEX_METERS = 26; // one texture tile covers this many metres of ground
@@ -619,7 +622,9 @@ export function createTerrain(anisotropy = 8) {
   let centerI = NaN;
   let centerJ = NaN;
 
-  function update(x, z, budget = 1) {
+  // beam: optional {dx, dz} unit vector of the long-range spotlight, so rocks along it
+  // cast shadows as far out as the beam reaches.
+  function update(x, z, budget = 1, beam = null) {
     const ci = Math.round(x / TILE);
     const cj = Math.round(z / TILE);
     if (ci !== centerI || cj !== centerJ) {
@@ -648,7 +653,25 @@ export function createTerrain(anisotropy = 8) {
       fillRocks(t, ox, oz);
     }
     for (const t of tiles) {
-      t.rocks.visible = Math.hypot(t.ti * TILE + TILE / 2 - x, t.tj * TILE + TILE / 2 - z) < ROCK_DIST;
+      const cx = t.ti * TILE + TILE / 2;
+      const cz = t.tj * TILE + TILE / 2;
+      t.rocks.visible = Math.hypot(cx - x, cz - z) < ROCK_DIST;
+      // Only rocks within reach of the shadow maps need to be drawn into them. Every
+      // tile's rocks in the shadow pass would be hundreds of thousands of triangles.
+      const gx = Math.max(Math.abs(cx - x) - TILE / 2, 0);
+      const gz = Math.max(Math.abs(cz - z) - TILE / 2, 0);
+      let cast = Math.hypot(gx, gz) < SHADOW_REACH;
+      if (!cast && beam && t.rocks.visible) {
+        // Does the beam corridor (out to BEAM_REACH, a little wide) touch this tile?
+        for (let d = 40; d <= BEAM_REACH && !cast; d += 40) {
+          const px = x + beam.dx * d;
+          const pz = z + beam.dz * d;
+          const ex = Math.max(Math.abs(cx - px) - TILE / 2, 0);
+          const ez = Math.max(Math.abs(cz - pz) - TILE / 2, 0);
+          cast = Math.hypot(ex, ez) < BEAM_HALF_WIDTH;
+        }
+      }
+      t.rocks.castShadow = cast;
     }
     return queue.length;
   }

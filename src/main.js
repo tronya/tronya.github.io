@@ -10,6 +10,7 @@ import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
+import { createRoadPosts } from './roadposts.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
@@ -146,6 +147,8 @@ for (const b of BASES) {
 const tracks = createTracks();
 const drawSize = new THREE.Vector2();
 const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 } };
+const roadPosts = createRoadPosts();
+scene.add(roadPosts.group);
 const sand = createSand();
 scene.add(sand.points);
 scene.add(tracks.mesh);
@@ -284,6 +287,14 @@ for (const side of [-1, 1]) {
 // the two headlights. It is on with full headlights only.
 const farLight = new THREE.SpotLight(0xfff6e4, 0, 320, 0.13, 0, 2);
 farLight.position.set(0, 1.4, 2.0);
+// It casts shadows too, so rocks far down the beam are not flat blobs. The narrow cone
+// keeps the map sharp: ~1 cm per texel a hundred metres out.
+farLight.castShadow = true;
+farLight.shadow.mapSize.set(1024, 1024);
+farLight.shadow.camera.near = 2;
+farLight.shadow.camera.far = 300;
+farLight.shadow.bias = -0.0003;
+farLight.shadow.normalBias = 0.05;
 // The bar is a rectangle, so the beam is too: project a soft-edged wide rectangle
 // through the cone instead of the usual round pool.
 {
@@ -857,7 +868,10 @@ function frame() {
   else sim.update(0.0001, { throttle: 0, steer: 0, brake: 1 });
 
   // Visual model follows the rigid body.
-  terrain.update(sim.pos.x, sim.pos.z);
+  {
+    const yw = sim.yaw();
+    terrain.update(sim.pos.x, sim.pos.z, 1, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
+  }
   sim.origin(origin);
   vehicle.root.position.copy(origin);
   vehicle.root.quaternion.copy(sim.quat);
@@ -1029,6 +1043,7 @@ function frame() {
   sandCtx.head.dx = fx;
   sandCtx.head.dz = fz;
   sand.update(dt, sandCtx);
+  roadPosts.update(t, daylight, sandCtx.pxPerUnit);
 
   const gustNow = updateDust(dt, t, camera);
   if (audio) {
@@ -1062,6 +1077,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { sim, camera, controls, power, renderer, scene, terrain, route, drawRoute, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, sim, camera, controls, power, renderer, scene, terrain, route, drawRoute, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

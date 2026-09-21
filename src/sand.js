@@ -83,7 +83,7 @@ export function createSand({ count = 2800, radius = 120 } = {}) {
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled = false; // instances move every frame
-  mesh.castShadow = false;
+  mesh.castShadow = true; // the sun's shadow map only covers the ground next to the rover, so this is cheap
   mesh.receiveShadow = true;
 
   const stats = { flying: 0, kicked: 0, respawned: 0 };
