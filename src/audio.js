@@ -31,7 +31,7 @@ export function createAudio() {
     ground: ctx.createGain(),
   };
   for (const b of Object.values(buses)) b.connect(master);
-  const levels = { master: 0.8, ambient: 0.08, engine: 0.7, ground: 0.6, voice: 0.85 };
+  const levels = { master: 0.8, ambient: 0.1, engine: 0.7, ground: 0.1, voice: 0.85 };
   buses.ambient.gain.value = levels.ambient;
   buses.engine.gain.value = levels.engine;
   buses.ground.gain.value = levels.ground;

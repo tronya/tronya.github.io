@@ -12,7 +12,9 @@
       border: 1px solid rgba(255, 210, 170, 0.25); border-radius: 8px; backdrop-filter: blur(6px);
       font-size: 12px; letter-spacing: 0.06em; user-select: none;
     }
-    #title { top: 16px; left: 16px; }
+    #leftCol { position: fixed; left: 16px; top: 16px; display: flex; flex-direction: column;
+      gap: 10px; align-items: flex-start; max-height: calc(100vh - 32px); }
+    #leftCol > .panel, #leftCol > #map { position: static; }
     #title b { display: block; font-size: 14px; letter-spacing: 0.14em; }
     #title span { opacity: 0.75; }
     #telemetry { top: 16px; right: 16px; text-align: right; }
@@ -62,18 +64,18 @@
     .keyRow span { flex: 0 0 96px; }
     #version { display: block; margin-top: 3px; font-size: 10px; opacity: 0.6; }
     @media (max-width: 1100px) { #lamps, #sound { display: none; } }
-    #nav { left: 16px; top: 76px; width: 190px; }
+    #nav { width: 190px; }
     .navTop { display: flex; align-items: center; gap: 12px; }
     #navArrow { font-size: 26px; color: #4fe0ff; line-height: 1; transition: transform 0.08s linear; }
     #nav b { font-size: 14px; letter-spacing: 0.12em; }
     #navDist { font-size: 15px; opacity: 0.9; margin-top: 2px; }
     .navGauge { margin-top: 8px; }
     .navGauge i { background: #4fe0ff; }
-    #map { position: fixed; left: 16px; top: 184px; width: 190px; overflow: hidden; border-radius: 6px;
+    #map { width: 190px; overflow: hidden; border-radius: 6px;
       border: 1px solid rgba(255, 210, 170, 0.45); background: rgba(40, 18, 10, 0.55);
       cursor: pointer; transition: width 0.18s ease; }
     #map.hidden { display: none; }
-    #map.big { width: min(78vw, 1020px); left: 50%; transform: translateX(-50%); top: 96px;
+    #leftCol > #map.big { position: fixed; width: min(78vw, 1020px); left: 50%; transform: translateX(-50%); top: 96px;
       border-color: rgba(79, 208, 255, 0.6); cursor: crosshair; }
     #mapCanvas, #routeCanvas { width: 100%; height: 100%; display: block; }
     #routeCanvas { position: absolute; inset: 0; }
@@ -105,7 +107,22 @@
 </head>
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
-  <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.17 · маяки баз · колія від коліс</span></div>
+  <div id="leftCol">
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.18 · HUD без накладань · тихіші колеса</span></div>
+    <div id="nav" class="panel">
+    <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div></div></div>
+    <div class="gauge navGauge"><i id="navBar"></i></div>
+  </div>
+    <div id="map">
+    <canvas id="mapCanvas"></canvas>
+    <canvas id="routeCanvas"></canvas>
+    <div id="mapMarker"></div>
+    <div id="mapBar">
+      <span id="routeInfo">Маршрут порожній — клацай, щоб ставити точки</span>
+      <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button><button id="mapCollapse">Згорнути</button></span>
+    </div>
+  </div>
+  </div>
   <div id="telemetry" class="panel">
     <div id="speed">0 км/год</div>
     <div id="mode"></div>
@@ -125,19 +142,6 @@
     <div class="row sol"><span>СОЛ</span><b id="clock">00:00</b></div>
   </div>
   <div id="warn" class="panel"></div>
-  <div id="nav" class="panel">
-    <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div></div></div>
-    <div class="gauge navGauge"><i id="navBar"></i></div>
-  </div>
-  <div id="map">
-    <canvas id="mapCanvas"></canvas>
-    <canvas id="routeCanvas"></canvas>
-    <div id="mapMarker"></div>
-    <div id="mapBar">
-      <span id="routeInfo">Маршрут порожній — клацай, щоб ставити точки</span>
-      <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button><button id="mapCollapse">Згорнути</button></span>
-    </div>
-  </div>
   <div id="hint" class="panel">Перевернулись? Натисни <kbd>R</kbd>, щоб поставити на колеса</div>
 
   <div id="menu" class="panel">
@@ -153,8 +157,8 @@
       <div class="secTitle">Звук</div>
       <label><span>Загальна</span><input id="mix-master" type="range" min="0" max="100"><b id="mixv-master">80</b></label>
       <label><span>Двигун</span><input id="mix-engine" type="range" min="0" max="100"><b id="mixv-engine">70</b></label>
-      <label><span>Колеса</span><input id="mix-ground" type="range" min="0" max="100"><b id="mixv-ground">60</b></label>
-      <label><span>Оточення</span><input id="mix-ambient" type="range" min="0" max="100"><b id="mixv-ambient">8</b></label>
+      <label><span>Колеса</span><input id="mix-ground" type="range" min="0" max="100"><b id="mixv-ground">10</b></label>
+      <label><span>Оточення</span><input id="mix-ambient" type="range" min="0" max="100"><b id="mixv-ambient">10</b></label>
       <label><span>Голос</span><input id="mix-voice" type="range" min="0" max="100"><b id="mixv-voice">85</b></label>
       <div class="secTitle">Ровер</div>
       <div class="btnRow">
