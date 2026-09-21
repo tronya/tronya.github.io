@@ -124,6 +124,13 @@ export function updateSky(material, sunDir, daylight) {
   u.disc.value = n.disc + (d.disc - n.disc) * daylight;
 }
 
+// The sky shader prints its colours as-is, but three converts the fog colour from
+// linear to sRGB before blending. Storing the sky's numbers unchanged therefore made
+// the fog several times brighter than the sky behind it (a cream smear by day, a grey
+// haze by night). Store the linear equivalent instead, so the fog is *rendered* as
+// exactly the horizon colour and distant terrain melts into the sky.
+const _mix = new THREE.Color();
 export function horizonColor(daylight, out) {
-  return out.copy(PRESETS.night.horizon).lerp(_c.copy(PRESETS.day.horizon), daylight);
+  _mix.copy(PRESETS.night.horizon).lerp(_c.copy(PRESETS.day.horizon), daylight);
+  return out.setRGB(_mix.r, _mix.g, _mix.b, THREE.SRGBColorSpace);
 }

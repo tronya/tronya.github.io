@@ -9,6 +9,12 @@ import { createTracks } from './tracks.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
+// Fog only far from the rover. Exponential fog was fully opaque by ~500 m, which
+// turned the ridges near-white. Linear fog leaves everything within FOG_NEAR
+// untouched and reaches full strength exactly where the streamed terrain window
+// ends (660 m), so it also hides the edge of the world.
+const FOG_NEAR = 330;
+const FOG_FAR = 655;
 // ---------- solar rover ----------
 const SOL_SECONDS = 330; // one Martian day, compressed
 const BATTERY_MAX = 100;
@@ -34,7 +40,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xffffff, 0.0042);
+scene.fog = new THREE.Fog(0xffffff, FOG_NEAR, FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
 
@@ -68,8 +74,8 @@ scene.add(hemi);
 
 // Day and night are the two ends of a continuous cycle, blended by sun height.
 const LOOKS = {
-  day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, fog: 0.0042, exposure: 1.0, dust: 0xc99a70, dustAlpha: 0.24 },
-  night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, fog: 0.0062, exposure: 1.2, dust: 0x6b5545, dustAlpha: 0.2 },
+  day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, exposure: 1.0, dust: 0xc99a70, dustAlpha: 0.24 },
+  night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, exposure: 1.2, dust: 0x6b5545, dustAlpha: 0.2 },
 };
 const sunDir = new THREE.Vector3(0, 1, 0);
 const look = { ...LOOKS.night };
@@ -95,13 +101,11 @@ function applyTimeOfDay(timeOfDay) {
   look.intensity = lerp(n.intensity, d.intensity);
   look.hemi = lerp(n.hemi, d.hemi);
   look.env = lerp(n.env, d.env);
-  look.fog = lerp(n.fog, d.fog);
   look.exposure = lerp(n.exposure, d.exposure);
   look.dustAlpha = lerp(n.dustAlpha, d.dustAlpha);
 
   updateSky(sky.material, sunDir, k);
   horizonColor(k, scene.fog.color);
-  scene.fog.density = look.fog;
   renderer.toneMappingExposure = look.exposure;
   sun.color.copy(cA.setHex(n.light)).lerp(cB.setHex(d.light), k);
   sun.intensity = look.intensity;
@@ -548,7 +552,7 @@ const mapBox = { x0: -ROUTE_HALF - MAP_PAD, x1: ROUTE_HALF + MAP_PAD, z0: 0, z1:
     ctx.textAlign = b.x < 0 ? 'left' : 'right';
     ctx.fillText(b.name, sx(b.x) + (b.x < 0 ? 8 : -8), sz(b.z) + 4);
   }
-  mapEl.style.aspectRatio = `${W} / ${H}`;
+  document.getElementById('mapView').style.aspectRatio = `${W} / ${H}`;
   const rc = document.getElementById('routeCanvas');
   rc.width = W;
   rc.height = H;
@@ -606,8 +610,12 @@ mapEl.addEventListener('click', (e) => {
     drawRoute();
     return;
   }
-  const r = mapEl.getBoundingClientRect();
-  route.push(mapToWorld((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height));
+  // Measure the map itself, not the whole box: the button bar sits below it now.
+  const r = document.getElementById('mapView').getBoundingClientRect();
+  const fx = (e.clientX - r.left) / r.width;
+  const fz = (e.clientY - r.top) / r.height;
+  if (fx < 0 || fx > 1 || fz < 0 || fz > 1) return;
+  route.push(mapToWorld(fx, fz));
   drawRoute();
   if (!autopilot) {
     setAutopilot(true);

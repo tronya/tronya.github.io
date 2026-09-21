@@ -207,7 +207,12 @@ export function surfaceHeight(x, z) {
   const h10 = terrainHeight((i + 1) * s, j * s);
   const h01 = terrainHeight(i * s, (j + 1) * s);
   const h11 = terrainHeight((i + 1) * s, (j + 1) * s);
-  return h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) + h01 * (1 - fx) * fz + h11 * fx * fz;
+  // PlaneGeometry splits every cell into two triangles across the anti-diagonal, so
+  // interpolate over the matching triangle. Averaging the cell bilinearly instead
+  // put the surface up to 8 cm off, and anything laid on the ground sank through it.
+  return fx + fz <= 1
+    ? h00 * (1 - fx - fz) + h01 * fz + h10 * fx
+    : h11 * (fx + fz - 1) + h01 * (1 - fx) + h10 * (1 - fz);
 }
 
 // ---------- streamed visuals ----------

@@ -12,8 +12,10 @@ const TELEPORT = 25; // a jump bigger than this is a reset, not driving
 // Cross-section from one side to the other. Nothing dips below the rendered surface:
 // the groove reads from the height difference between berm and floor, which also
 // keeps it clear of the terrain mesh instead of z-fighting it.
-const BERM = [0.60, 0.41, 0.30];
-const FLOOR = [0.23, 0.125, 0.085];
+// Vertex colours go into the buffer already linear, so writing sRGB-looking numbers
+// here made the berms glow almost white. THREE.Color does the conversion.
+const BERM = new THREE.Color(0xc08a5a).toArray(); // dust thrown clear of the tyre
+const FLOOR = new THREE.Color(0x7c4b2f).toArray(); // packed down under it
 const LANES = [
   { off: -1.0, lift: 0.005, tint: BERM },
   { off: -0.68, lift: 0.125, tint: BERM },

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Solar Rover</title>
+  <link rel="icon" href="data:,">
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #d69e75; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
     canvas { display: block; }
@@ -71,15 +72,19 @@
     #navDist { font-size: 15px; opacity: 0.9; margin-top: 2px; }
     .navGauge { margin-top: 8px; }
     .navGauge i { background: #4fe0ff; }
-    #map { width: 190px; overflow: hidden; border-radius: 6px;
+    #map { width: 190px; overflow: hidden; border-radius: 6px; color: #fbeee0;
       border: 1px solid rgba(255, 210, 170, 0.45); background: rgba(40, 18, 10, 0.55);
       cursor: pointer; transition: width 0.18s ease; }
     #map.hidden { display: none; }
     #leftCol > #map.big { position: fixed; width: min(78vw, 1020px); left: 50%; transform: translateX(-50%); top: 96px;
       border-color: rgba(79, 208, 255, 0.6); cursor: crosshair; }
+    /* The absolutely positioned overlay and marker need a positioned parent of their own.
+       #map is static inside the column, so without this they anchored to the whole
+       left column and the route was drawn over the title. */
+    #mapView { position: relative; width: 100%; }
     #mapCanvas, #routeCanvas { width: 100%; height: 100%; display: block; }
     #routeCanvas { position: absolute; inset: 0; }
-    #mapBar { display: none; position: absolute; left: 0; right: 0; bottom: 0; gap: 10px;
+    #mapBar { display: none; gap: 10px;
       align-items: center; justify-content: space-between; padding: 7px 10px; font-size: 11px;
       background: rgba(28, 13, 8, 0.82); border-top: 1px solid rgba(255, 210, 170, 0.28); }
     #map.big #mapBar { display: flex; }
@@ -108,15 +113,17 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.18 · HUD без накладань · тихіші колеса</span></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.20 · колір туману збігається з небом</span></div>
     <div id="nav" class="panel">
     <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div></div></div>
     <div class="gauge navGauge"><i id="navBar"></i></div>
   </div>
     <div id="map">
-    <canvas id="mapCanvas"></canvas>
-    <canvas id="routeCanvas"></canvas>
-    <div id="mapMarker"></div>
+    <div id="mapView">
+      <canvas id="mapCanvas"></canvas>
+      <canvas id="routeCanvas"></canvas>
+      <div id="mapMarker"></div>
+    </div>
     <div id="mapBar">
       <span id="routeInfo">Маршрут порожній — клацай, щоб ставити точки</span>
       <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button><button id="mapCollapse">Згорнути</button></span>
