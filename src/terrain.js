@@ -261,18 +261,49 @@ function craterHeight(x, z) {
   return h;
 }
 
+// Flat-topped mesas standing over the plain, the shape Mars is photographed in.
+// A slow field says where one stands, and a very narrow smoothstep across its edge
+// turns what would be a hillside into a sheer wall and leaves the top dead level.
+// The second tier only rises where the first is already there, so they stack into
+// terraces. Returns the height; `onTop` says how flat the ground up there should be.
+const MESA = { onTop: 0 };
+function mesaHeight(wx, wz) {
+  const m1 = fbm(wx * 0.00068 + 310, wz * 0.00068 - 180, 3);
+  // A narrow band right at the threshold gave every barely-there wobble of the coarse
+  // field the same sharp-walled edge as a real mesa: dozens of shin-high "cliffs"
+  // scattered over otherwise flat ground, which read from a distance as dark smudges.
+  // Starting the ramp well above the field's middle means only its actual local
+  // maxima ever clear it, so a mesa now stands somewhere there was already a broad
+  // rise, instead of any point where the noise merely ticks past the midline.
+  const k1 = smooth(0.58, 0.635, m1);
+  if (k1 <= 0) {
+    MESA.onTop = 0;
+    return 0;
+  }
+  const m2 = fbm(wx * 0.00152 + 52, wz * 0.00152 + 640, 2);
+  const k2 = smooth(0.52, 0.55, m2);
+  MESA.onTop = k1 * (0.55 + 0.45 * k2);
+  return k1 * 84 + k1 * k2 * 50;
+}
+
 // A graded road across rough country: gentle along the road, hilly, cratered and
 // strewn with boulders once you leave it.
 export function terrainHeight(x, z) {
   const rd = roadDist(x, z);
   const rough = smooth(ROAD_HALF + 14, ROAD_HALF + 170, rd); // 0 on the road, 1 out in the rough
+  const away = smooth(60, 340, rd);
   const wx = x + (fbm(x * 0.02 + 11, z * 0.02 + 3, 2) - 0.5) * 26;
   const wz = z + (fbm(x * 0.02 - 7, z * 0.02 + 29, 2) - 0.5) * 26;
 
-  let h = (fbm(wx * 0.009 + 5, wz * 0.009 + 9, 3) - 0.46) * 9 * (0.3 + 2.5 * rough);
-  h += (fbm(wx * 0.026 + 60, wz * 0.026 - 18, 2) - 0.46) * 2.4 * (0.3 + 3.0 * rough);
+  // Mesas are worked out first: the rolling hills are flattened away on top of one,
+  // or the plateau reads as another lumpy hill instead of a table.
+  const mesa = away > 0 ? mesaHeight(wx, wz) : 0;
+  const flatTop = 1 - 0.75 * MESA.onTop * away;
 
-  const duneZone = smooth(0.44, 0.6, fbm(wx * 0.012 + 200, wz * 0.012 + 90, 2));
+  let h = (fbm(wx * 0.009 + 5, wz * 0.009 + 9, 3) - 0.46) * 9 * (0.3 + 2.5 * rough) * flatTop;
+  h += (fbm(wx * 0.026 + 60, wz * 0.026 - 18, 2) - 0.46) * 2.4 * (0.3 + 3.0 * rough) * flatTop;
+
+  const duneZone = smooth(0.44, 0.6, fbm(wx * 0.012 + 200, wz * 0.012 + 90, 2)) * flatTop;
   if (duneZone > 0) {
     const ph = (wx * 0.7 + wz * 0.4) * 0.16 + (fbm(wx * 0.03, wz * 0.03, 2) - 0.44) * 5;
     h += duneZone * 1.15 * 0.5 * (Math.sin(ph) + 0.5 * Math.sin(2 * ph + 0.6)) * (0.4 + 1.2 * rough);
@@ -281,8 +312,8 @@ export function terrainHeight(x, z) {
 
   // Real mountains, kept off the road: the road threads the valleys between them, so
   // cutting across means climbing. The foothills start ~70 m from the road.
-  const away = smooth(60, 340, rd);
   if (away > 0) {
+    h += away * mesa;
     const range = smooth(0.4, 0.64, fbm(wx * 0.00085 + 120, wz * 0.00085 - 60, 4));
     if (range > 0) {
       const ridge = 1 - Math.abs(fbm(wx * 0.0013 + 7, wz * 0.0013 + 81, 3) * 2 - 1);
@@ -380,12 +411,20 @@ export function surfaceHeight(x, z) {
 // ---------- streamed visuals ----------
 
 const TILE = 220;
-const GRID = 7; // tiles across, centred on the rover
+const GRID = 21; // tiles across, centred on the rover
 const SEG = 48; // uniform, so a tile keeps its geometry as the window scrolls
-const SHADOW_REACH = 60; // rocks this close cast shadows
-const BEAM_REACH = 260; // and rocks this far along the long-range spotlight
+// Rocks this close always cast a real shadow (see the dedicated `nearRocks` mesh in
+// createTerrain — InstancedMesh.castShadow is one flag for the whole batch, so the
+// old approach of toggling it per streamed 220 m tile made two rocks a few metres
+// apart disagree about shadows whenever they landed in different tiles).
+const NEAR_SHADOW_REACH = 200;
+const BEAM_REACH = 300; // and rocks this far along the long-range spotlight
 const BEAM_HALF_WIDTH = 45;
-const ROCK_DIST = 430; // rocks are drawn this far out; fog hides the rest
+const ROCK_DIST_BASE = 774; // rocks are drawn this far out; fog hides the rest
+let ROCK_DIST = ROCK_DIST_BASE;
+export function setViewScale(k) {
+  ROCK_DIST = ROCK_DIST_BASE * k;
+}
 export const MESH_STEP = 220 / 48; // TILE / SEG, the spacing of terrain vertices
 const TEX_METERS = 26; // one texture tile covers this many metres of ground
 
@@ -401,8 +440,11 @@ function makeGroundTexture(anisotropy) {
     img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  // Blotches at several scales; a single scale reads as an obvious repeat.
-  for (const [count, rMin, rMax, alpha] of [[40, 30, 90, 0.035], [120, 8, 34, 0.05], [260, 2, 9, 0.07]]) {
+  // Fine grain only. A layer of big, dark blotches used to sit here too, and because
+  // this texture doubles as a bump map, each one also faked a shallow dent in the
+  // lighting — at a grazing look-out across the plain, dozens of these tiled across
+  // the view as soft dark ovals scattered over otherwise flat ground.
+  for (const [count, rMin, rMax, alpha] of [[160, 5, 20, 0.028]]) {
     for (let i = 0; i < count; i++) {
       ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '0,0,0' : '255,255,255'},${alpha * (0.4 + Math.random())})`;
       const x = Math.random() * size;
@@ -514,10 +556,20 @@ function fillTile(geo, ox, oz, seg) {
     // The graded road is paler, packed dust; off it the ground is darker and rockier.
     const onRoad = 1 - smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
     _c.lerp(roadCol, onRoad * 0.6);
-    const steep = smooth(0.06, 0.4, 1 - normal.getY(k));
+    // Widening the mountains' roughness earlier made ordinary rolling ground pick up
+    // enough small-scale slope to light this up too, so gentle hillsides across the
+    // whole off-road plain were reading as dark rock smudges from a distance. Only
+    // genuinely steep faces — mesa walls, crater rims, real cliffs — should tint.
+    const steep = smooth(0.24, 0.58, 1 - normal.getY(k));
     if (steep > 0) {
-      const band = Math.sin(pos.getY(k) * 1.7 + a * 10) * 0.5 + 0.5;
-      _c.lerp(rockCol, steep * 0.85).lerp(strata, steep * band * 0.35);
+      // Sedimentary beds: broad layers with finer banding inside them, keyed to world
+      // height, so they run dead level right around a mesa the way real strata do.
+      const y = pos.getY(k);
+      const bed = Math.sin(y * 0.21 + a * 2.2);
+      const fine = Math.sin(y * 0.78 + a * 3.5);
+      const band = clamp(0.5 + 0.34 * bed + 0.16 * fine, 0, 1);
+      _c.lerp(rockCol, steep * (0.55 + 0.45 * (1 - band)));
+      _c.lerp(strata, steep * band * 0.6);
     }
     col.setXYZ(k, _c.r, _c.g, _c.b);
   }
@@ -538,7 +590,7 @@ export function createTerrain(anisotropy = 8) {
   const group = new THREE.Group();
   const tex = makeGroundTexture(anisotropy);
   const mat = new THREE.MeshStandardMaterial({
-    vertexColors: true, map: tex, bumpMap: tex, bumpScale: 1.2, roughness: 1, metalness: 0,
+    vertexColors: true, map: tex, bumpMap: tex, bumpScale: 0.35, roughness: 1, metalness: 0,
   });
   // One texture repeating every few metres reads as an obvious grid from a distance.
   // Mixing a second sample at an incommensurate scale and offset pushes the combined
@@ -560,6 +612,21 @@ export function createTerrain(anisotropy = 8) {
   const rockGeo = makeRockGeometry();
   const rockMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0, flatShading: true, vertexColors: true });
   const ROCKS_PER_TILE = Math.ceil(TILE / STONE_CELL + 2) ** 2;
+
+  // A small, always-shadow-casting set of rocks confined to a disc around the rover
+  // (the same "rebuild every frame within a radius" trick src/sand.js uses), instead
+  // of the big per-tile batches ever casting a near shadow. colorWrite/depthWrite are
+  // off, so it draws nothing into the beauty pass — its only effect is the shadow it
+  // casts — and so it can't double-render or z-fight the same rocks the visible tile
+  // mesh already draws.
+  const nearRockMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+  const NEAR_ROCKS_MAX = Math.ceil((2 * NEAR_SHADOW_REACH) / STONE_CELL + 2) ** 2;
+  const nearRocks = new THREE.InstancedMesh(rockGeo, nearRockMat, NEAR_ROCKS_MAX);
+  nearRocks.castShadow = true;
+  nearRocks.receiveShadow = false;
+  nearRocks.frustumCulled = false;
+  nearRocks.count = 0;
+  group.add(nearRocks);
 
   const half = (GRID - 1) / 2;
   const tiles = [];
@@ -585,6 +652,20 @@ export function createTerrain(anisotropy = 8) {
   const posV = new THREE.Vector3();
   const axisY = new THREE.Vector3(0, 1, 0);
 
+  // Assumes `stone` already holds the record from a just-true `stoneInCell(ci, cj)`
+  // call; writes it into instance slot n. Shared by the per-tile fill below and the
+  // near-field shadow fill, so both draw the exact same rock the exact same way.
+  function writeRockInstance(im, n, ci, cj) {
+    q.setFromAxisAngle(axisY, hash(ci + 5, cj + 9) * Math.PI * 2);
+    posV.set(stone.x, terrainHeight(stone.x, stone.z), stone.z);
+    scl.set(stone.r, stone.h, stone.r);
+    m4.compose(posV, q, scl);
+    im.setMatrixAt(n, m4);
+    const shade = 0.2 + 0.18 * hash(ci + 77, cj + 12);
+    _c.setHSL(0.045 + 0.03 * hash(ci, cj + 3), 0.38, stone.big ? shade * 0.85 : shade);
+    im.setColorAt(n, _c);
+  }
+
   function fillRocks(tile, ox, oz) {
     const im = tile.rocks;
     const ci0 = Math.floor(ox / STONE_CELL);
@@ -593,21 +674,41 @@ export function createTerrain(anisotropy = 8) {
     let n = 0;
     for (let dj = 0; dj < span && n < im.instanceMatrix.count; dj++) {
       for (let di = 0; di < span && n < im.instanceMatrix.count; di++) {
-        if (!stoneInCell(ci0 + di, cj0 + dj)) continue;
-        q.setFromAxisAngle(axisY, hash(ci0 + di + 5, cj0 + dj + 9) * Math.PI * 2);
-        posV.set(stone.x, terrainHeight(stone.x, stone.z), stone.z);
-        scl.set(stone.r, stone.h, stone.r);
-        m4.compose(posV, q, scl);
-        im.setMatrixAt(n, m4);
-        const shade = 0.2 + 0.18 * hash(ci0 + di + 77, cj0 + dj + 12);
-        _c.setHSL(0.045 + 0.03 * hash(ci0 + di, cj0 + dj + 3), 0.38, stone.big ? shade * 0.85 : shade);
-        im.setColorAt(n, _c);
+        const ci = ci0 + di;
+        const cj = cj0 + dj;
+        if (!stoneInCell(ci, cj)) continue;
+        writeRockInstance(im, n, ci, cj);
         n++;
       }
     }
     im.count = n;
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }
+
+  // Every rock within NEAR_SHADOW_REACH of the rover, regardless of which streamed
+  // tile it happens to belong to — this is what actually gives each rock its own
+  // shadow verdict instead of inheriting its tile's.
+  function fillNearRocks(x, z) {
+    const ci0 = Math.floor((x - NEAR_SHADOW_REACH) / STONE_CELL);
+    const cj0 = Math.floor((z - NEAR_SHADOW_REACH) / STONE_CELL);
+    const span = Math.ceil((2 * NEAR_SHADOW_REACH) / STONE_CELL) + 2;
+    const r2 = NEAR_SHADOW_REACH * NEAR_SHADOW_REACH;
+    let n = 0;
+    for (let dj = 0; dj < span && n < nearRocks.instanceMatrix.count; dj++) {
+      for (let di = 0; di < span && n < nearRocks.instanceMatrix.count; di++) {
+        const ci = ci0 + di;
+        const cj = cj0 + dj;
+        if (!stoneInCell(ci, cj)) continue;
+        const dx = stone.x - x;
+        const dz = stone.z - z;
+        if (dx * dx + dz * dz > r2) continue;
+        writeRockInstance(nearRocks, n, ci, cj);
+        n++;
+      }
+    }
+    nearRocks.count = n;
+    nearRocks.instanceMatrix.needsUpdate = true;
   }
 
   // Slot i holds whichever world tile in the window satisfies index % GRID === i, so
@@ -652,16 +753,18 @@ export function createTerrain(anisotropy = 8) {
       fillTile(t.mesh.geometry, ox, oz, SEG);
       fillRocks(t, ox, oz);
     }
+    // Near-field rock shadows are handled entirely by the dedicated nearRocks mesh
+    // now (see below) — accurate per rock, not per 220 m tile.
+    fillNearRocks(x, z);
     for (const t of tiles) {
       const cx = t.ti * TILE + TILE / 2;
       const cz = t.tj * TILE + TILE / 2;
       t.rocks.visible = Math.hypot(cx - x, cz - z) < ROCK_DIST;
-      // Only rocks within reach of the shadow maps need to be drawn into them. Every
-      // tile's rocks in the shadow pass would be hundreds of thousands of triangles.
-      const gx = Math.max(Math.abs(cx - x) - TILE / 2, 0);
-      const gz = Math.max(Math.abs(cz - z) - TILE / 2, 0);
-      let cast = Math.hypot(gx, gz) < SHADOW_REACH;
-      if (!cast && beam && t.rocks.visible) {
+      // The far beam-reach case is the only thing tile-level shadow casting still
+      // does — rare (headlights, at night, far ahead), so the same per-tile
+      // granularity that was wrong up close is fine out there.
+      let cast = false;
+      if (beam && t.rocks.visible) {
         // Does the beam corridor (out to BEAM_REACH, a little wide) touch this tile?
         for (let d = 40; d <= BEAM_REACH && !cast; d += 40) {
           const px = x + beam.dx * d;

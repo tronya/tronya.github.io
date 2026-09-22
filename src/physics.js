@@ -46,8 +46,8 @@ const C_STOP = 10 * CORNER;
 const CLIMB_RATE = 1.6;
 const CLIMB_FLOOR = 2.5;
 // Below this the suspension axis is too horizontal to reach the ground at all.
-const UP_MIN = 0.3;
-const UP_FADE = 0.55;
+const UP_MIN = 0.5;
+const UP_FADE = 0.8;
 const F_DRIVE = 26000; // total, all four wheels
 const POWER = 180000;
 const V_MAX = 12; // ~43 km/h cruising
@@ -77,9 +77,20 @@ for (const y of [0.35, 0.85]) {
   for (const x of [-1.55, 0, 1.55]) for (const z of [-3.6, -1.8, 0, 1.8, 3.7]) BODY_POINTS.push(new THREE.Vector3(x, y, z));
 }
 for (const x of [-1.35, 0, 1.35]) for (const z of [-3.2, -1.5, 0.5, 2.0]) BODY_POINTS.push(new THREE.Vector3(x, 1.38, z));
+// The sill along each flank. Without it the only side points sit above the centre of
+// mass, so a truck on its flank had nothing under its low centre of gravity and tipped
+// straight back over onto its wheels or its roof instead of lying there.
+for (const x of [-1.55, 1.55]) for (const z of [-3.4, -1.7, 0, 1.7, 3.4]) BODY_POINTS.push(new THREE.Vector3(x, -0.45, z));
+// The outer faces of the tyres. Lying on its side the truck rests on its four wheels,
+// which stand well proud of the flank, and that base is wide enough to hold the low
+// centre of mass. The points stay above the tread even at full bump, so they never
+// touch the ground while driving.
+for (const x of [-2.0, 2.0]) for (const z of [AXLE_Z.front, AXLE_Z.rear]) for (const dy of [-0.55, 0, 0.55]) {
+  BODY_POINTS.push(new THREE.Vector3(x, -SUSP.Lstatic + dy, z));
+}
 const F_SUSP_MAX = 9 * CORNER; // a wheel can never push harder than ~9x its static load
 const F_HULL_MAX = 4 * WEIGHT;
-const C_HULL = 4 * WEIGHT;
+const HULL_ITER = 6;
 const HULL_EXIT_V = 1.0;
 const MU_HULL = 0.7;
 const V_LIMIT = 40;
@@ -139,7 +150,15 @@ const rel = V3(), mount = V3(), vm = V3(), vp = V3(), tmpA = V3(), tmpB = V3();
 const force = V3(), torque = V3(), grad = { x: 0, z: 0 };
 const nrm = V3(), dir = V3(), fw = V3(), lw = V3(), f0 = V3();
 const wb = V3(), tb = V3(), iw = V3(), gyro = V3(), blk = V3();
-const qInv = new THREE.Quaternion(), dq = new THREE.Quaternion();
+const rxn = V3(), tmpI = V3();
+const hullContacts = Array.from({ length: 96 }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0 }));
+// World-space inverse inertia applied to a vector: out = R diag(1/I) R^T v.
+function invInertia(v, out, q) {
+  out.copy(v).applyQuaternion(qInvScratch.copy(q).invert());
+  out.set(out.x / INERTIA.x, out.y / INERTIA.y, out.z / INERTIA.z);
+  return out.applyQuaternion(q);
+}
+const qInv = new THREE.Quaternion(), dq = new THREE.Quaternion(), qInvScratch = new THREE.Quaternion();
 
 export class VehicleSim {
   constructor() {
@@ -238,8 +257,13 @@ export class VehicleSim {
       c.steer = damp(c.steer, clamp(input.steerTo, -1, 1) * maxSteer, 5, dt);
     } else {
       const inp = clamp(input.steer, -1, 1);
-      if (inp !== 0) c.steer += (inp * maxSteer * dt) / STEER_LOCK_TIME;
-      else if (input.centre) c.steer = damp(c.steer, 0, 7, dt);
+      // The wheel turns at this rate whichever way it moves, whether that is a key
+      // winding it toward lock or the wheel unwinding back to centre once released.
+      const step = (maxSteer * dt) / STEER_LOCK_TIME;
+      if (inp !== 0) c.steer += inp * step;
+      else if (c.steer > step) c.steer -= step;
+      else if (c.steer < -step) c.steer += step;
+      else c.steer = 0;
     }
     c.steer = clamp(c.steer, -maxSteer, maxSteer);
 
@@ -268,6 +292,67 @@ export class VehicleSim {
 
   pointVelocity(r, out) {
     return out.crossVectors(this.angVel, r).add(this.vel);
+  }
+
+  // Hull vs ground: lets the truck scrape, roll onto its side or lie on its roof.
+  // Solved as impulses on the velocities, a few passes over all touching points. The
+  // ground pushes hardest where the truck's weight actually is, so a truck that lands
+  // flat on its side stays there. Independent spring-like forces at every point did
+  // not distribute like that: with the centre of mass low, equal forces at points all
+  // above it kicked the body over, and it bounced and rolled onto its roof.
+  solveHull(h) {
+    const { quat: q, pos, vel, angVel } = this;
+    let n = 0;
+    for (const b of BODY_POINTS) {
+      rel.copy(b).sub(COM).applyQuaternion(q);
+      tmpB.copy(pos).add(rel);
+      const gh = groundHeight(tmpB.x, tmpB.z);
+      const pen = Math.min(gh - tmpB.y, 0.8);
+      if (pen <= 0) continue;
+      groundGradient(tmpB.x, tmpB.z, grad);
+      const c = hullContacts[n++];
+      c.rel.copy(rel);
+      c.n.set(-grad.x, 1, -grad.z).normalize();
+      c.pen = pen;
+      c.jn = 0;
+    }
+    if (!n) return;
+    qInv.copy(q).invert();
+    const cap = F_HULL_MAX * h; // most impulse one point may add in a step
+    for (let it = 0; it < HULL_ITER; it++) {
+      for (let i = 0; i < n; i++) {
+        const c = hullContacts[i];
+        this.pointVelocity(c.rel, vp);
+        const vn = vp.dot(c.n);
+        const vWant = Math.min(c.pen * 10, HULL_EXIT_V);
+        let j = 0;
+        if (vn < vWant && c.jn < cap) {
+          rxn.crossVectors(c.rel, c.n);
+          invInertia(rxn, tmpI, q);
+          j = Math.min((vWant - vn) / (1 / MASS + rxn.dot(tmpI)), cap - c.jn);
+          c.jn += j;
+          vel.addScaledVector(c.n, j / MASS);
+          rxn.multiplyScalar(j);
+          invInertia(rxn, tmpI, q);
+          angVel.add(tmpI);
+        }
+        // Coulomb friction against the sliding of this point, limited by how hard it
+        // is being pressed into the ground.
+        if (j <= 0) continue;
+        this.pointVelocity(c.rel, vp);
+        vp.addScaledVector(c.n, -vp.dot(c.n));
+        const vt = vp.length();
+        if (vt < 1e-4) continue;
+        vp.multiplyScalar(1 / vt);
+        rxn.crossVectors(c.rel, vp);
+        invInertia(rxn, tmpI, q);
+        const jt = Math.min(MU_HULL * j, vt / (1 / MASS + rxn.dot(tmpI)));
+        vel.addScaledVector(vp, -jt / MASS);
+        rxn.multiplyScalar(-jt);
+        invInertia(rxn, tmpI, q);
+        angVel.add(tmpI);
+      }
+    }
   }
 
   step(h) {
@@ -410,28 +495,6 @@ export class VehicleSim {
       w.spinRate = vx / WHEEL_R;
     }
 
-    // Hull vs ground: lets the truck scrape, roll onto its side or lie on its roof.
-    for (const b of BODY_POINTS) {
-      rel.copy(b).sub(COM).applyQuaternion(q);
-      tmpB.copy(pos).add(rel);
-      const gh = groundHeight(tmpB.x, tmpB.z);
-      const pen = Math.min(gh - tmpB.y, 0.8);
-      if (pen <= 0) continue;
-      groundGradient(tmpB.x, tmpB.z, grad);
-      nrm.set(-grad.x, 1, -grad.z).normalize();
-      this.pointVelocity(rel, vp);
-      // Same one-way limit as the bump stop: a 2.5 t truck scrapes and settles on
-      // rock, it does not bounce off it.
-      const vn = vp.dot(nrm);
-      const vWant = Math.min(pen * 10, HULL_EXIT_V);
-      const Fn = vn < vWant ? Math.min(F_HULL_MAX, C_HULL * (vWant - vn)) : 0;
-      if (Fn <= 0) continue;
-      tmpB.copy(nrm).multiplyScalar(Fn);
-      vp.addScaledVector(nrm, -vn); // tangential velocity
-      tmpB.addScaledVector(vp, (-MU_HULL * Fn) / (vp.length() + 0.15));
-      this.applyAt(tmpB, rel);
-    }
-
     // Soft wall at the edge of the map.
     const r = Math.hypot(pos.x, pos.z);
     if (r > MAX_RADIUS) {
@@ -440,9 +503,8 @@ export class VehicleSim {
       force.z += (-pos.z / r) * over * MASS * 1.0 - vel.z * MASS * 0.5;
     }
 
-    // Integrate. Angular part is solved in body axes (gyroscopic term included).
+    // Integrate velocities. Angular part is solved in body axes (gyroscopic term included).
     vel.addScaledVector(force, h / MASS);
-    pos.addScaledVector(vel, h);
 
     qInv.copy(q).invert();
     wb.copy(angVel).applyQuaternion(qInv);
@@ -456,8 +518,11 @@ export class VehicleSim {
     const spin = angVel.length();
     angVel.multiplyScalar(1 - Math.min(0.5, (W_DRAG_LIN + W_DRAG_SQ * spin) * h));
     if (spin > W_LIMIT) angVel.setLength(W_LIMIT);
+
+    this.solveHull(h);
     if (vel.length() > V_LIMIT) vel.setLength(V_LIMIT);
 
+    pos.addScaledVector(vel, h);
     dq.set(angVel.x * h * 0.5, angVel.y * h * 0.5, angVel.z * h * 0.5, 0).multiply(q);
     q.set(q.x + dq.x, q.y + dq.y, q.z + dq.z, q.w + dq.w).normalize();
   }

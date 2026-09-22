@@ -11,6 +11,20 @@ const SPACING_MAX = 300;
 const POST_H = 1.5;
 const PERIOD = 2.4; // seconds between flashes
 const WAVE = 0.045; // phase step per 200 m of road, as a fraction of the period
+const LIGHT_POOL = 4; // real lights, lent to the nearest posts
+// The pool of light should be visible as far out as the flash itself — up to ~300 m
+// down the road, not just standing right next to the post. Inverse-square falloff
+// cannot do that without searing the post itself, so these lamps fall off closer to
+// linearly.
+const LIGHT_RANGE = 300;
+const LIGHT_DECAY = 1;
+const LIGHT_IDLE = 14;
+const LIGHT_PEAK = 120;
+
+const smoothstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 const glowVertex = /* glsl */ `
   attribute float aPhase;
@@ -112,16 +126,31 @@ export function createRoadPosts() {
 
   group.add(posts, caps, glow);
 
+  // A lamp really does light the ground it stands on, but one light per post would be
+  // forty of them in every shader. Instead a few lights are lent to whichever posts
+  // are nearest, and follow the rover down the road.
+  const lamps = [];
+  for (let i = 0; i < LIGHT_POOL; i++) {
+    const l = new THREE.PointLight(0xffa23a, 0, LIGHT_RANGE, LIGHT_DECAY);
+    l.visible = false;
+    group.add(l);
+    lamps.push(l);
+  }
+  const near = [];
+
   const on = new THREE.Color(0xffa23a);
   const off = new THREE.Color(0x3a1a08);
   const c = new THREE.Color();
   const wasOn = new Uint8Array(n);
+  const flash = new Float32Array(n);
 
   return {
     group,
     count: n,
-    // t: seconds, daylight 0..1, pxPerUnit: pixels per metre at 1 m distance
-    update(t, daylight, pxPerUnit) {
+    lamps,
+    // t: seconds, daylight 0..1, pxPerUnit: pixels per metre at 1 m distance,
+    // viewer: where the rover is, so the pool of lights can follow it
+    update(t, daylight, pxPerUnit, viewer) {
       uniforms.uTime.value = t;
       uniforms.uPx.value = pxPerUnit;
       // Sunlight washes the glow out but the lamps still show in daylight.
@@ -129,6 +158,8 @@ export function createRoadPosts() {
       let changed = false;
       for (let i = 0; i < n; i++) {
         const ph = (t / PERIOD + glowPhase[i]) % 1;
+        // Same short flash the glow uses, kept as a number so the lights can ramp.
+        flash[i] = Math.min(1, smoothstep(0, 0.02, ph) * (1 - smoothstep(0.07, 0.16, ph)));
         const lit = ph < 0.1 ? 1 : 0;
         if (lit === wasOn[i]) continue;
         wasOn[i] = lit;
@@ -136,6 +167,31 @@ export function createRoadPosts() {
         changed = true;
       }
       if (changed) caps.instanceColor.needsUpdate = true;
+
+      if (!viewer) return;
+      // The nearest few posts, cheapest first: one pass keeping the best handful.
+      near.length = 0;
+      for (let i = 0; i < n; i++) {
+        const d = Math.hypot(glowPos[i * 3] - viewer.x, glowPos[i * 3 + 2] - viewer.z);
+        if (d > LIGHT_RANGE) continue;
+        near.push({ i, d });
+      }
+      near.sort((a, b) => a.d - b.d);
+      const night = 1 - daylight;
+      for (let s = 0; s < lamps.length; s++) {
+        const l = lamps[s];
+        const pick = near[s];
+        if (!pick || night <= 0.02) {
+          l.visible = false;
+          continue;
+        }
+        const i = pick.i;
+        l.position.set(glowPos[i * 3], glowPos[i * 3 + 1], glowPos[i * 3 + 2]);
+        // A dim standby between flashes so the post never goes pitch dark, then the
+        // pool of light on the ground pulses with the lamp.
+        l.intensity = night * (LIGHT_IDLE + LIGHT_PEAK * flash[i]);
+        l.visible = true;
+      }
     },
   };
 }

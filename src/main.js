@@ -2,15 +2,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildVehicle, WHEEL_R, SUSP } from './vehicle.js';
 import { VehicleSim } from './physics.js';
-import {
-  createTerrain, groundHeight, terrainHeight, roadDist, BASES, ROUTE_PTS, ROUTE_BOUNDS, ROUTE_LEN, ROAD_HALF,
-  roadSpawn, roadRemaining,
-} from './terrain.js';
+import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
 import { createRoadPosts } from './roadposts.js';
+import { createMinimap3D } from './minimap3d.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
@@ -18,8 +16,8 @@ const ARRIVE_R = 70; // how close counts as docked at a base
 // turned the ridges near-white. Linear fog leaves everything within FOG_NEAR
 // untouched and reaches full strength exactly where the streamed terrain window
 // ends (660 m), so it also hides the edge of the world.
-const FOG_NEAR = 330;
-const FOG_FAR = 655;
+const FOG_NEAR = 594;
+const FOG_FAR = 1179;
 // ---------- solar rover ----------
 const SOL_SECONDS = 330; // one Martian day, compressed
 const BATTERY_MAX = 100;
@@ -69,8 +67,8 @@ let envTarget = null;
 // Sun by day, moon by night: same light, different look.
 const sun = new THREE.DirectionalLight(0xffffff, 1);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 1, far: 130 });
+sun.shadow.mapSize.set(4096, 4096);
+Object.assign(sun.shadow.camera, { left: -250, right: 250, top: 250, bottom: -250, near: 1, far: 400 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
@@ -90,9 +88,22 @@ const cB = new THREE.Color();
 let daylight = 0;
 let envAt = -1;
 
+// The sun is up between these hours; the rest of the sol is night.
+const SUNRISE = 5 / 24;
+const SUNSET = 21 / 24;
+const DAY_SPAN = SUNSET - SUNRISE;
+
+// Its arc is half a circle either way, but stretched over the long day and squeezed
+// into the short night, rather than a plain sine that would split the sol evenly.
+function sunAngle(t) {
+  if (t >= SUNRISE && t < SUNSET) return (Math.PI * (t - SUNRISE)) / DAY_SPAN;
+  const intoNight = t < SUNRISE ? t + 1 - SUNSET : t - SUNSET;
+  return Math.PI + (Math.PI * intoNight) / (1 - DAY_SPAN);
+}
+
 // timeOfDay 0 = midnight, 0.5 = noon.
 function applyTimeOfDay(timeOfDay) {
-  const ang = (timeOfDay - 0.25) * Math.PI * 2;
+  const ang = sunAngle(timeOfDay);
   const elev = Math.sin(ang);
   sunDir.set(Math.cos(ang) * 0.55, elev, Math.cos(ang) * 0.45 + 0.18).normalize();
   sunDir.y = Math.max(elev, -0.35);
@@ -193,69 +204,6 @@ function spawnPuff(x, y, z, drift) {
   p.sprite.visible = true;
 }
 
-// ---------- airborne dust ----------
-// A block of motes that follows the camera and wraps around it, so a handful of
-// points reads as haze blowing across the whole plain.
-const DUST_N = 1400;
-const DUST_BOX = 150;
-const dustPos = new Float32Array(DUST_N * 3);
-const dustPhase = new Float32Array(DUST_N);
-for (let i = 0; i < DUST_N; i++) {
-  dustPos[i * 3] = (Math.random() - 0.5) * DUST_BOX;
-  dustPos[i * 3 + 1] = Math.random() * 26;
-  dustPos[i * 3 + 2] = (Math.random() - 0.5) * DUST_BOX;
-  dustPhase[i] = Math.random() * Math.PI * 2;
-}
-const dustGeo = new THREE.BufferGeometry();
-dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-// Without a map, PointsMaterial draws hard opaque squares; the soft sprite makes
-// them read as motes rather than confetti.
-const dustMat = new THREE.PointsMaterial({
-  color: 0xc79a72, size: 0.34, sizeAttenuation: true, transparent: true,
-  opacity: 0.3, depthWrite: false, map: dustTex, alphaTest: 0.01, fog: true,
-});
-const dustField = new THREE.Points(dustGeo, dustMat);
-dustField.frustumCulled = false;
-scene.add(dustField);
-
-// Wind direction drifts slowly; gusts thicken the haze for a few seconds.
-const wind = new THREE.Vector2(1, 0.3).normalize();
-let gust = 0;
-let gustTimer = 6 + Math.random() * 10;
-
-function updateDust(dt, t, cam) {
-  gustTimer -= dt;
-  if (gustTimer <= 0) {
-    gustTimer = 9 + Math.random() * 16;
-    gust = 1;
-  }
-  gust = Math.max(0, gust - dt * 0.22);
-  const ang = t * 0.035;
-  wind.set(Math.cos(ang), Math.sin(ang * 0.7));
-  const sp = (3.5 + 9 * gust) * dt;
-  const half = DUST_BOX / 2;
-  for (let i = 0; i < DUST_N; i++) {
-    const k = i * 3;
-    dustPos[k] += wind.x * sp + Math.sin(t * 0.8 + dustPhase[i]) * dt * 1.4;
-    dustPos[k + 2] += wind.y * sp + Math.cos(t * 0.6 + dustPhase[i]) * dt * 1.4;
-    dustPos[k + 1] += Math.sin(t * 0.5 + dustPhase[i] * 1.7) * dt * 0.5;
-    // Wrap the block around the camera
-    let dx = dustPos[k] - cam.position.x;
-    let dz = dustPos[k + 2] - cam.position.z;
-    if (dx > half) dustPos[k] -= DUST_BOX;
-    else if (dx < -half) dustPos[k] += DUST_BOX;
-    if (dz > half) dustPos[k + 2] -= DUST_BOX;
-    else if (dz < -half) dustPos[k + 2] += DUST_BOX;
-    const gy = groundHeight(dustPos[k], dustPos[k + 2]);
-    if (dustPos[k + 1] < gy + 0.4) dustPos[k + 1] = gy + 0.4 + Math.random() * 20;
-    else if (dustPos[k + 1] > gy + 30) dustPos[k + 1] = gy + 0.5;
-  }
-  dustGeo.attributes.position.needsUpdate = true;
-  dustMat.opacity = (0.24 + 0.3 * gust) * (0.45 + 0.55 * daylight);
-  dustMat.size = 0.3 + 0.22 * gust;
-  return gust;
-}
-
 // ---------- headlights, cab glow ----------
 const headlights = [];
 const glows = [];
@@ -292,7 +240,7 @@ farLight.position.set(0, 1.4, 2.0);
 farLight.castShadow = true;
 farLight.shadow.mapSize.set(1024, 1024);
 farLight.shadow.camera.near = 2;
-farLight.shadow.camera.far = 300;
+farLight.shadow.camera.far = 350;
 farLight.shadow.bias = -0.0003;
 farLight.shadow.normalBias = 0.05;
 // The bar is a rectangle, so the beam is too: project a soft-edged wide rectangle
@@ -323,6 +271,7 @@ const farAim = new THREE.Object3D();
 farAim.position.set(0, -0.8, 110);
 farLight.target = farAim;
 vehicle.root.add(farLight, farAim);
+const farUpLocal = new THREE.Vector3(0, 1, 0); // the truck's own up, before rotation
 
 // The rear had no light of any kind: just a flat red box that read as a dash at
 // night while the nose had two haloes and two beams.
@@ -371,12 +320,6 @@ function toggleSand() {
   const btn = document.getElementById('sandToggle');
   btn.textContent = sand.enabled ? 'Камінці: увімк' : 'Камінці: вимк';
   btn.classList.toggle('on', sand.enabled);
-}
-
-function toggleMap() {
-  const hidden = mapEl.classList.toggle('hidden');
-  const btn = document.getElementById('mapToggle');
-  if (btn) btn.textContent = hidden ? 'Карта: вимк' : 'Карта: увімк';
 }
 
 // L cycles: auto (the default) -> off -> marker lights only -> full headlights.
@@ -476,6 +419,30 @@ for (const tab of document.querySelectorAll('#menu .tab')) {
 document.getElementById('mapToggle').addEventListener('click', toggleMap);
 document.getElementById('sandToggle').addEventListener('click', toggleSand);
 
+// ---------- graphics settings ----------
+document.getElementById('viewDist').addEventListener('input', (e) => {
+  const k = e.target.value / 100;
+  document.getElementById('viewDistV').textContent = `${e.target.value}%`;
+  setViewScale(k);
+  scene.fog.near = FOG_NEAR * k;
+  scene.fog.far = FOG_FAR * k;
+});
+const btnShadows = document.getElementById('shadowsToggle');
+btnShadows.addEventListener('click', () => {
+  const on = !renderer.shadowMap.enabled;
+  renderer.shadowMap.enabled = on;
+  scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+  btnShadows.textContent = `Тіні: ${on ? 'увімк' : 'вимк'}`;
+  btnShadows.classList.toggle('on', on);
+});
+let dynamicLight = true;
+const btnDynLight = document.getElementById('dynLightToggle');
+btnDynLight.addEventListener('click', () => {
+  dynamicLight = !dynamicLight;
+  btnDynLight.textContent = `Динамічне світло: ${dynamicLight ? 'увімк' : 'вимк'}`;
+  btnDynLight.classList.toggle('on', dynamicLight);
+});
+
 // ---------- input ----------
 let autopilot = false;
 const keys = new Set();
@@ -522,9 +489,6 @@ function stepOdometer(t) {
 
 // ---------- the crossing ----------
 const trip = { target: BASES[1], docked: false, legs: 0, best: Infinity };
-const hudNavDist = () => document.getElementById('navDist');
-const hudNavRoad = document.getElementById('navRoad');
-let roadNavAt = 0;
 
 function distanceTo(b) {
   return Math.hypot(sim.pos.x - b.x, sim.pos.z - b.z);
@@ -557,14 +521,11 @@ function flash(msg) {
   flashUntil = clock.elapsedTime + 2.6;
 }
 
-const steerFill = document.getElementById('steerFill');
-const steerDeg = document.getElementById('steerDeg');
 const hudSpeed = document.getElementById('speed');
 const hudMode = document.getElementById('mode');
 const hudHint = document.getElementById('hint');
 const btnAuto = document.getElementById('autopilot');
 const btnReset = document.getElementById('reset');
-const hudBars = W.map((w) => document.getElementById(`susp-${w.name}`));
 // The autopilot parks, unfolds, charges to full, folds and carries on by itself.
 const auto = { state: 'drive' };
 
@@ -619,167 +580,171 @@ function resetVehicle(home = false) {
   camYaw = sim.yaw();
 }
 
-// ---------- route map: the whole crossing, not the ground nearby ----------
-const mapEl = document.getElementById('map');
-const mapMarker = document.getElementById('mapMarker');
-const MAP_PAD_X = 520;
-const MAP_PAD_Z = 420;
-const mapBox = {
-  x0: ROUTE_BOUNDS.x0 - MAP_PAD_X, x1: ROUTE_BOUNDS.x1 + MAP_PAD_X,
-  z0: ROUTE_BOUNDS.z0 - MAP_PAD_Z, z1: ROUTE_BOUNDS.z1 + MAP_PAD_Z,
-};
-(function buildRouteMap() {
-  const W = 760;
-  const H = Math.round((W * (mapBox.z1 - mapBox.z0)) / (mapBox.x1 - mapBox.x0));
-  const canvas = document.getElementById('mapCanvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  const sx = (x) => ((x - mapBox.x0) / (mapBox.x1 - mapBox.x0)) * W;
-  const sz = (z) => ((z - mapBox.z0) / (mapBox.z1 - mapBox.z0)) * H;
-  const wx = (px) => mapBox.x0 + (px / W) * (mapBox.x1 - mapBox.x0);
-  const wz = (py) => mapBox.z0 + (py / H) * (mapBox.z1 - mapBox.z0);
-
-  // Ground: pale near the road, darkening into the rough country and the ridges.
-  const B = 5;
-  for (let py = 0; py < H; py += B) {
-    for (let px = 0; px < W; px += B) {
-      const mx = wx(px + B / 2);
-      const mz = wz(py + B / 2);
-      const d = roadDist(mx, mz);
-      const rough = Math.min(1, Math.max(0, (d - ROAD_HALF) / 500));
-      const ridge = Math.min(1, Math.max(0, (d - 1500) / 260));
-      // Height shows as brightness, so the mountains read on the map.
-      const hi = Math.min(1, Math.max(0, terrainHeight(mx, mz) / 190));
-      const r = 92 - 42 * rough - 40 * ridge + 120 * hi;
-      const g = 50 - 24 * rough - 24 * ridge + 80 * hi;
-      const bl = 33 - 15 * rough - 15 * ridge + 55 * hi;
-      ctx.fillStyle = `rgb(${r | 0},${g | 0},${bl | 0})`;
-      ctx.fillRect(px, py, B, B);
-    }
-  }
-
-  // The straight line between the bases: shorter, but across the rough ground.
-  ctx.beginPath();
-  ctx.moveTo(sx(BASES[0].x), sz(BASES[0].z));
-  ctx.lineTo(sx(BASES[1].x), sz(BASES[1].z));
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([2, 7]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // The road
-  ctx.beginPath();
-  ROUTE_PTS.forEach((p, i) => (i ? ctx.lineTo(sx(p.x), sz(p.z)) : ctx.moveTo(sx(p.x), sz(p.z))));
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = 'rgba(232,170,116,0.95)';
-  ctx.lineWidth = 12;
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,232,204,0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([6, 6]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  for (const b of BASES) {
-    ctx.fillStyle = '#4fe0ff';
-    ctx.beginPath();
-    ctx.arc(sx(b.x), sz(b.z), 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#ffe9d6';
-    ctx.font = 'bold 13px ui-monospace, monospace';
-    const right = b.x > (mapBox.x0 + mapBox.x1) / 2;
-    ctx.textAlign = right ? 'right' : 'left';
-    ctx.fillText(b.name, sx(b.x) + (right ? -11 : 11), sz(b.z) + 5);
-  }
-  document.getElementById('mapView').style.aspectRatio = `${W} / ${H}`;
-  document.getElementById('map').style.setProperty('--aspect', String(W / H));
-  const rc = document.getElementById('routeCanvas');
-  rc.width = W;
-  rc.height = H;
-})();
-
 // ---------- route: waypoints the autopilot drives through ----------
+// The map parks small in the corner, turning slowly like a display model. A tap
+// opens it into a big, orbitable dialog (drag to rotate, wheel to zoom); tapping
+// its ground there — a tap, not a drag — drops a waypoint. The autopilot only ever
+// drives through waypoints you've placed, never straight at a base on its own.
 const route = [];
 const WAYPOINT_R = 40;
-const mapToWorld = (fx, fz) => ({
-  x: mapBox.x0 + fx * (mapBox.x1 - mapBox.x0),
-  z: mapBox.z0 + fz * (mapBox.z1 - mapBox.z0),
-});
-const worldToMap = (p) => ({
-  x: ((p.x - mapBox.x0) / (mapBox.x1 - mapBox.x0)) * routeCtx.canvas.width,
-  y: ((p.z - mapBox.z0) / (mapBox.z1 - mapBox.z0)) * routeCtx.canvas.height,
-});
-const routeCtx = document.getElementById('routeCanvas').getContext('2d');
+const map3dEl = document.getElementById('map3d');
 const routeInfo = document.getElementById('routeInfo');
+const minimap = createMinimap3D(document.getElementById('map3dCanvas'), document.getElementById('map3dOverlay'));
 
-function drawRoute() {
-  const c = routeCtx;
-  c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+function updateRouteInfo() {
   routeInfo.textContent = route.length
     ? `Маршрут: ${route.length} ${route.length === 1 ? 'точка' : 'точок'}`
-    : 'Маршрут порожній — клацай, щоб ставити точки';
-  if (!route.length) return;
-
-  const pts = [worldToMap(sim.pos), ...route.map(worldToMap)];
-  c.setLineDash([7, 6]);
-  c.strokeStyle = 'rgba(79, 208, 255, 0.85)';
-  c.lineWidth = 2;
-  c.beginPath();
-  for (const p of pts) c.lineTo(p.x, p.y);
-  c.stroke();
-  c.setLineDash([]);
-
-  pts.slice(1).forEach((p, i) => {
-    c.fillStyle = i === 0 ? '#7ce68f' : '#4fe0ff';
-    c.beginPath();
-    c.arc(p.x, p.y, 7, 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = '#0d1a22';
-    c.font = 'bold 10px ui-monospace, monospace';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(String(i + 1), p.x, p.y + 0.5);
-  });
+    : 'Маршрут порожній — клацай по карті, щоб ставити точки';
+  minimap.setRoute(route);
 }
 
-mapEl.addEventListener('click', (e) => {
-  if (e.target.closest('#mapBar') || e.target.closest('#mapClose')) return;
-  // First click opens the map; once open, clicks drop waypoints.
-  if (!mapEl.classList.contains('big')) {
-    mapEl.classList.add('big');
-    drawRoute();
-    return;
-  }
-  // Measure the map itself, not the whole box: the button bar sits below it now.
-  const r = document.getElementById('mapView').getBoundingClientRect();
-  const fx = (e.clientX - r.left) / r.width;
-  const fz = (e.clientY - r.top) / r.height;
-  if (fx < 0 || fx > 1 || fz < 0 || fz > 1) return;
-  route.push(mapToWorld(fx, fz));
-  drawRoute();
+minimap.setOnAdd((x, z) => {
+  route.push({ x, z });
+  updateRouteInfo();
   if (!autopilot) {
     setAutopilot(true);
     flash('Маршрут задано — автопілот увімкнено');
   }
 });
-document.getElementById('mapClose').addEventListener('click', () => mapEl.classList.remove('big'));
+
+function openMap() {
+  map3dEl.classList.add('big');
+  minimap.setBig(true);
+  minimap.resize();
+}
+function closeMap() {
+  map3dEl.classList.remove('big');
+  minimap.setBig(false);
+  minimap.resize();
+}
+minimap.setOnTapSmall(openMap);
+document.getElementById('mapClose').addEventListener('click', closeMap);
+
+function toggleMap() {
+  const hidden = map3dEl.classList.toggle('hidden');
+  const btn = document.getElementById('mapToggle');
+  if (btn) btn.textContent = hidden ? 'Карта: вимк' : 'Карта: увімк';
+  if (hidden) closeMap();
+  else minimap.resize();
+}
 document.getElementById('routeClear').addEventListener('click', () => {
   route.length = 0;
-  drawRoute();
+  updateRouteInfo();
 });
 document.getElementById('routeUndo').addEventListener('click', () => {
   route.pop();
-  drawRoute();
+  updateRouteInfo();
 });
+window.addEventListener('resize', () => {
+  if (!map3dEl.classList.contains('hidden')) minimap.resize();
+});
+updateRouteInfo();
+minimap.resize();
 
-function updateMinimap() {
-  mapMarker.style.left = `${((sim.pos.x - mapBox.x0) / (mapBox.x1 - mapBox.x0)) * 100}%`;
-  mapMarker.style.top = `${((sim.pos.z - mapBox.z0) / (mapBox.z1 - mapBox.z0)) * 100}%`;
-  mapMarker.style.transform = `translate(-50%, -50%) rotate(${180 - (sim.yaw() * 180) / Math.PI}deg)`;
+// ---------- compass ----------
+// A ribbon that scrolls under a fixed centre marker, the way a real heading tape
+// does: a world direction's mark slides toward the centre as you turn to face it.
+// It floats with no backing panel, so every stroke gets a dark outline first —
+// that, not the tick spacing, is what keeps it legible over bright ground too.
+const compassCtx = document.getElementById('compassCanvas').getContext('2d');
+const CARDINAL = { 0: 'Пн', 90: 'Сх', 180: 'Пд', 270: 'Зх' };
+const HALF_WINDOW = 62; // degrees shown either side of centre
+function wrapDeg(d) {
+  return ((d % 360) + 360) % 360;
+}
+function outlinedText(c, text, x, y) {
+  c.lineWidth = 3;
+  c.strokeStyle = 'rgba(20, 10, 6, 0.85)';
+  c.strokeText(text, x, y);
+  c.fillText(text, x, y);
+}
+function drawCompass(yaw, waypoints) {
+  const c = compassCtx;
+  const w = c.canvas.width;
+  const h = c.canvas.height;
+  const headingDeg = wrapDeg((yaw * 180) / Math.PI);
+  const pxPerDeg = w / 130;
+  const cx = w / 2;
+  c.clearRect(0, 0, w, h);
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';
+
+  // Ticks and labels are generated straight from world degrees (multiples of 10,
+  // major every 30), never from a fixed screen step — that's what made numbers
+  // wink in and out before: a screen-spaced sample could skip right past a round
+  // number as the heading changed, and land on nothing to draw.
+  const first = Math.ceil((headingDeg - HALF_WINDOW) / 10) * 10;
+  for (let deg = first; deg <= headingDeg + HALF_WINDOW; deg += 10) {
+    const d = deg - headingDeg;
+    const x = cx + d * pxPerDeg;
+    if (x < -10 || x > w + 10) continue;
+    const wrapped = wrapDeg(deg);
+    const major = wrapped % 30 === 0;
+    c.lineWidth = major ? 4.2 : 2.6;
+    c.strokeStyle = 'rgba(20, 10, 6, 0.85)';
+    c.beginPath();
+    c.moveTo(x, h - (major ? 20 : 12));
+    c.lineTo(x, h - 4);
+    c.stroke();
+    c.lineWidth = major ? 1.8 : 1.1;
+    c.strokeStyle = major ? 'rgba(255, 214, 176, 0.95)' : 'rgba(255, 214, 176, 0.55)';
+    c.beginPath();
+    c.moveTo(x, h - (major ? 20 : 12));
+    c.lineTo(x, h - 4);
+    c.stroke();
+    if (major) {
+      c.font = 'bold 12px ui-monospace, monospace';
+      c.fillStyle = CARDINAL[wrapped] ? '#7ce6ff' : '#ffd6b0';
+      outlinedText(c, CARDINAL[wrapped] || String(wrapped), x, h - 26);
+    }
+  }
+
+  // Waypoints: where each numbered route point actually lies, as a badge above the
+  // ribbon — the same idea as an objective marker on a game compass. A bare triangle
+  // was too small to hold a legible digit, so this is a numbered disc instead, the
+  // same shape and colour as its marker on the map.
+  if (waypoints) {
+    const r = 9;
+    const badgeY = 13;
+    for (const wp of waypoints) {
+      let d = ((wp.bearing - headingDeg + 180) % 360 + 360) % 360 - 180;
+      if (Math.abs(d) > HALF_WINDOW) continue;
+      const x = cx + d * pxPerDeg;
+      // Tail pointing down at the ribbon, then the disc on top of it.
+      c.fillStyle = wp.color;
+      c.beginPath();
+      c.moveTo(x - 5, badgeY + r - 2);
+      c.lineTo(x + 5, badgeY + r - 2);
+      c.lineTo(x, badgeY + r + 7);
+      c.closePath();
+      c.fill();
+      c.beginPath();
+      c.arc(x, badgeY, r, 0, Math.PI * 2);
+      c.fillStyle = wp.color;
+      c.fill();
+      c.lineWidth = 2;
+      c.strokeStyle = 'rgba(20, 10, 6, 0.9)';
+      c.stroke();
+      c.fillStyle = '#0d1a22';
+      c.font = 'bold 11px ui-monospace, monospace';
+      c.textBaseline = 'middle';
+      c.fillText(String(wp.n), x, badgeY + 1);
+      c.textBaseline = 'alphabetic';
+    }
+  }
+
+  c.lineWidth = 3;
+  c.strokeStyle = 'rgba(20, 10, 6, 0.8)';
+  c.beginPath();
+  c.moveTo(cx, 2);
+  c.lineTo(cx, h - 2);
+  c.stroke();
+  c.lineWidth = 1.6;
+  c.strokeStyle = '#4fe0ff';
+  c.beginPath();
+  c.moveTo(cx, 2);
+  c.lineTo(cx, h - 2);
+  c.stroke();
 }
 
 const AUTO_LABEL = { drive: 'АВТОПІЛОТ', stopping: 'АВТОПІЛОТ: ЗУПИНКА',
@@ -807,8 +772,10 @@ function autopilotInput() {
   if (auto.state === 'stowing' && power.panels < 0.01) auto.state = 'drive';
 
   if (auto.state !== 'drive') return { throttle: 0, steer: 0, brake: 1, boost: false };
+  // No waypoints plotted: sit tight rather than heading for a base on its own.
+  if (!route.length) return { throttle: 0, steer: 0, brake: 1, boost: false };
 
-  const tgt = route.length ? route[0] : trip.target;
+  const tgt = route[0];
   const want = Math.atan2(tgt.x - sim.pos.x, tgt.z - sim.pos.z);
   return {
     throttle: clamp((10.5 - sim.speed) * 0.6, -1, 1),
@@ -860,6 +827,18 @@ camera.position.copy(camTarget).add(camOffset.set(-Math.sin(camYaw) * CAM_BACK, 
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
+
+// ---------- debug bar: fps and frame time ----------
+// A browser page has no API for real OS CPU load, so frame time stands in for it —
+// the same idea (how long each frame took to compute and draw), just measured here
+// instead of by the OS.
+let dbgLast = performance.now();
+let fpsEma = 60;
+let msEma = 16.7;
+let dbgAt = 0;
+const dbgFpsEl = document.getElementById('dbgFps');
+const dbgMsEl = document.getElementById('dbgMs');
+
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
@@ -870,12 +849,19 @@ function frame() {
   // Visual model follows the rigid body.
   {
     const yw = sim.yaw();
-    terrain.update(sim.pos.x, sim.pos.z, 1, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
+    terrain.update(sim.pos.x, sim.pos.z, 8, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
   }
   sim.origin(origin);
   vehicle.root.position.copy(origin);
   vehicle.root.quaternion.copy(sim.quat);
   vehicle.setSteer(sim.cmd.steer);
+
+  // The roof spot's rectangular beam is drawn through its shadow camera, and that
+  // camera's own `up` never rotates with its parent — only its position and look
+  // direction do. Left at the world's up, the beam stayed level on a banked truck
+  // instead of banking with it. Feeding it the truck's actual up vector each frame
+  // rolls the rectangle along with the body, the way a real fixed lamp would.
+  farLight.shadow.camera.up.copy(farUpLocal).applyQuaternion(sim.quat);
 
   const speedAbs = Math.abs(sim.speed);
   W.forEach((w, i) => {
@@ -883,7 +869,6 @@ function frame() {
     const Lvis = s.contact ? clamp(s.L, SUSP.Lmin, SUSP.Lmax) : SUSP.Lmax;
     vehicle.setSuspension(i, Lvis);
     w.spin.rotation.x += s.spinRate * dt;
-    hudBars[i].style.height = `${Math.round(((SUSP.Lmax - Lvis) / (SUSP.Lmax - SUSP.Lmin)) * 100)}%`;
 
     if (s.contact) {
       w.dustAcc += (Math.abs(s.vx) + Math.abs(s.vy)) * dt * 0.9;
@@ -927,8 +912,10 @@ function frame() {
   flippedFor = sim.upY < 0.55 && speedAbs < 2.5 && righting.t <= 0 ? flippedFor + dt : 0;
   hudHint.classList.toggle('show', flippedFor > 1.0);
   // ---------- sol cycle and power ----------
-  timeOfDay = (timeOfDay + dt / SOL_SECONDS) % 1;
-  applyTimeOfDay(timeOfDay);
+  if (dynamicLight) {
+    timeOfDay = (timeOfDay + dt / SOL_SECONDS) % 1;
+    applyTimeOfDay(timeOfDay);
+  }
   setLamps(lampLevel());
 
   const target = power.wantPanels ? 1 : 0;
@@ -971,16 +958,16 @@ function frame() {
   // ---------- navigation ----------
   if (route.length && Math.hypot(sim.pos.x - route[0].x, sim.pos.z - route[0].z) < WAYPOINT_R) {
     route.shift();
-    drawRoute();
+    updateRouteInfo();
     if (audio) audio.beep(route.length ? 980 : 1240, 0.12);
     if (!route.length) flash('Маршрут пройдено');
   }
   if (autopilot) hudMode.textContent = AUTO_LABEL[auto.state];
-  if (mapEl.classList.contains('big') && route.length) drawRoute();
 
+  // Arrival at a base is still tracked (for the docking message and H's target),
+  // even though the HUD no longer shows a running bearing to it.
   const dist = distanceTo(trip.target);
   const other = trip.target === BASES[0] ? BASES[1] : BASES[0];
-  const legTotal = Math.hypot(trip.target.x - other.x, trip.target.z - other.z);
   if (dist < ARRIVE_R && !trip.docked) {
     trip.docked = true;
     trip.legs++;
@@ -990,18 +977,6 @@ function frame() {
   } else if (dist > ARRIVE_R * 1.6) {
     trip.docked = false;
   }
-  const bearing = Math.atan2(trip.target.x - sim.pos.x, trip.target.z - sim.pos.z);
-  document.getElementById('navArrow').style.transform =
-    `rotate(${((bearing - sim.yaw()) * 180) / Math.PI}deg)`;
-  document.getElementById('navName').textContent = trip.target.name;
-  document.getElementById('navDist').textContent =
-    dist > 1500 ? `${(dist / 1000).toFixed(2)} км` : `${Math.round(dist)} м`;
-  if (t > roadNavAt) {
-    roadNavAt = t + 0.5;
-    const rem = roadRemaining(sim.pos.x, sim.pos.z, trip.target === BASES[1]);
-    hudNavRoad.textContent = `по дорозі ${rem > 1500 ? (rem / 1000).toFixed(1) + ' км' : Math.round(rem) + ' м'}`;
-  }
-  document.getElementById('navBar').style.width = `${clamp(100 * (1 - dist / legTotal), 0, 100)}%`;
 
   // Beacons pulse; the one you are heading for pulses harder and brighter.
   const pulse = 0.5 + 0.5 * Math.sin(t * 2.4);
@@ -1043,9 +1018,8 @@ function frame() {
   sandCtx.head.dx = fx;
   sandCtx.head.dz = fz;
   sand.update(dt, sandCtx);
-  roadPosts.update(t, daylight, sandCtx.pxPerUnit);
+  roadPosts.update(t, daylight, sandCtx.pxPerUnit, sim.pos);
 
-  const gustNow = updateDust(dt, t, camera);
   if (audio) {
     const contacts = W.filter((w) => w.sim.contact).length / 4;
     audio.update({ speed: sim.speed, throttle: sim.cmd.throttle, contact: contacts,
@@ -1058,15 +1032,29 @@ function frame() {
     }
   }
 
-  const lockPct = sim.maxSteer > 1e-3 ? (sim.cmd.steer / sim.maxSteer) * 100 : 0;
-  steerFill.style.width = `${Math.abs(lockPct) / 2}%`;
-  steerFill.style.left = lockPct >= 0 ? 'auto' : '50%';
-  steerFill.style.right = lockPct >= 0 ? '50%' : 'auto';
-  steerDeg.textContent = `${((sim.cmd.steer * 180) / Math.PI).toFixed(0)}°`;
-
   hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год`;
-  updateMinimap();
+  drawCompass(
+    sim.yaw(),
+    route.map((p, i) => ({
+      n: i + 1,
+      bearing: (Math.atan2(p.x - sim.pos.x, p.z - sim.pos.z) * 180) / Math.PI,
+      color: i === 0 ? '#7ce68f' : '#4fe0ff',
+    }))
+  );
+  if (!map3dEl.classList.contains('hidden')) minimap.update(sim, dt);
   renderer.render(scene, camera);
+
+  const now = performance.now();
+  const rawMs = now - dbgLast;
+  dbgLast = now;
+  msEma += (rawMs - msEma) * 0.08;
+  fpsEma += (1000 / Math.max(rawMs, 1) - fpsEma) * 0.08;
+  if (t > dbgAt) {
+    dbgAt = t + 0.3;
+    dbgFpsEl.textContent = `${Math.round(fpsEma)} FPS`;
+    dbgMsEl.textContent = `· ${msEma.toFixed(1)} мс/кадр`;
+  }
+
   requestAnimationFrame(frame);
 }
 
@@ -1077,6 +1065,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, sim, camera, controls, power, renderer, scene, terrain, route, drawRoute, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

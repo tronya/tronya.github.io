@@ -15,14 +15,11 @@
     }
     #leftCol { position: fixed; left: 16px; top: 16px; display: flex; flex-direction: column;
       gap: 10px; align-items: flex-start; max-height: calc(100vh - 32px); }
-    #leftCol > .panel, #leftCol > #map { position: static; }
+    #leftCol > .panel { position: static; }
     #title b { display: block; font-size: 14px; letter-spacing: 0.14em; }
     #title span { opacity: 0.75; }
     #telemetry { top: 16px; right: 16px; text-align: right; }
     #speed { font-size: 20px; }
-    #susp { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; font-size: 10px; text-align: center; }
-    .bar { position: relative; width: 14px; height: 44px; margin: 0 auto 2px; border: 1px solid rgba(255, 210, 170, 0.4); border-radius: 3px; overflow: hidden; }
-    .bar i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #ff7a2b; }
     .cap { margin-top: 4px; font-size: 10px; opacity: 0.7; }
     #telemetry { min-width: 212px; }
     #telemetry hr { border: 0; border-top: 1px solid rgba(255, 210, 170, 0.25); margin: 10px 0 8px; }
@@ -34,9 +31,11 @@
     #warn { top: 128px; left: 50%; transform: translateX(-50%); display: none; border-color: rgba(255, 90, 60, 0.7); color: #ffd0be; }
     #warn.show { display: block; }
     kbd { padding: 1px 6px; border: 1px solid rgba(255, 210, 170, 0.4); border-radius: 4px; background: rgba(255, 255, 255, 0.08); }
-    .steerBar { position: relative; height: 8px; margin-top: 6px; border: 1px solid rgba(255, 210, 170, 0.4); border-radius: 4px; }
-    .steerBar::before { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(255, 210, 170, 0.55); }
-    .steerBar i { position: absolute; top: 0; bottom: 0; width: 0; background: #4fe0ff; }
+    /* No panel backing — it floats right over the view, so ticks and numbers carry
+       their own dark outline (drawn in JS) to stay legible over any ground colour. */
+    #compass { top: 16px; left: 50%; transform: translateX(-50%); padding: 0;
+      background: none; border: none; backdrop-filter: none; }
+    #compassCanvas { display: block; }
     #autopilot, #reset, #menuBtn { bottom: 16px; cursor: pointer; font: inherit; font-size: 12px; letter-spacing: 0.06em; }
     #autopilot { right: 16px; }
     #reset { right: 170px; }
@@ -65,42 +64,38 @@
     .keyRow span { flex: 0 0 96px; }
     #version { display: block; margin-top: 3px; font-size: 10px; opacity: 0.6; }
     @media (max-width: 1100px) { #lamps, #sound { display: none; } }
-    #nav { width: 190px; }
-    .navTop { display: flex; align-items: center; gap: 12px; }
-    #navArrow { font-size: 26px; color: #4fe0ff; line-height: 1; transition: transform 0.08s linear; }
-    #nav b { font-size: 14px; letter-spacing: 0.12em; }
-    #navDist { font-size: 15px; opacity: 0.9; margin-top: 2px; }
-    #navRoad { font-size: 11px; opacity: 0.65; margin-top: 1px; }
-    .navGauge { margin-top: 8px; }
-    .navGauge i { background: #4fe0ff; }
-    #map { width: min(190px, calc((100vh - 380px) * var(--aspect, 2))); overflow: hidden; border-radius: 6px; color: #fbeee0;
-      border: 1px solid rgba(255, 210, 170, 0.45); background: rgba(40, 18, 10, 0.55);
-      cursor: pointer; transition: width 0.18s ease; }
-    #map.hidden { display: none; }
-    #leftCol > #map.big { min-width: 320px; position: fixed; width: min(78vw, 1020px, calc((100vh - 270px) * var(--aspect, 2))); left: 50%; transform: translateX(-50%); top: 96px;
-      border-color: rgba(79, 208, 255, 0.6); cursor: crosshair; }
-    /* The absolutely positioned overlay and marker need a positioned parent of their own.
-       #map is static inside the column, so without this they anchored to the whole
-       left column and the route was drawn over the title. */
-    #mapView { position: relative; width: 100%; }
-    #mapCanvas, #routeCanvas { width: 100%; height: 100%; display: block; }
-    #routeCanvas { position: absolute; inset: 0; }
-    #mapBar { display: none; gap: 6px 10px; flex-wrap: wrap;
-      align-items: center; justify-content: space-between; padding: 7px 10px; font-size: 11px;
-      background: rgba(28, 13, 8, 0.82); border-top: 1px solid rgba(255, 210, 170, 0.28); }
-    #map.big #mapBar { display: flex; }
-    #routeInfo { flex: 1 1 100%; }
+    /* The 3D relief map parks small in the bottom-left corner, turning slowly on its
+       own — a tap opens it into a big, orbitable dialog where you can plot a route. */
+    #map3d { left: 16px; bottom: 16px; width: 300px; height: 230px; padding: 0;
+      overflow: hidden; border-radius: 8px; border-color: rgba(79, 208, 255, 0.45); }
+    #map3d.hidden { display: none; }
+    #map3d.big { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%);
+      width: min(82vw, 900px); height: min(78vh, 640px); }
+    #map3dCanvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+    /* Waypoint badges are drawn here in plain 2D, on top of the 3D view — a pixel
+       size set this way stays exactly that many pixels, small panel or big dialog,
+       with none of the calibration a 3D sprite needs to fake the same thing.
+       pointer-events: none so taps still reach the WebGL canvas underneath. */
+    #map3dOverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #map3d #mapBar { display: none; }
+    #map3d.big #mapBar { display: flex; gap: 6px 10px; flex-wrap: wrap;
+      align-items: center; justify-content: space-between; padding: 6px 10px; font-size: 10.5px;
+      position: absolute; left: 0; right: 0; bottom: 0; background: rgba(28, 13, 8, 0.8);
+      border-top: 1px solid rgba(255, 210, 170, 0.25); }
+    #routeInfo { flex: 1 1 100%; opacity: 0.85; }
     .mapBtns { display: flex; gap: 6px; }
-    #mapBar button { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 210, 170, 0.32);
+    #mapBar button { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 210, 170, 0.32);
       color: inherit; font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 4px; cursor: pointer; }
-    #mapClose { display: none; position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; padding: 0;
+    #mapClose { display: none; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; z-index: 1;
       background: rgba(28, 13, 8, 0.78); border: 1px solid rgba(255, 210, 170, 0.32); border-radius: 50%;
-      color: inherit; font: inherit; font-size: 17px; line-height: 1; cursor: pointer; }
-    #map.big #mapClose { display: block; }
-    #mapMarker { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
-      border-bottom: 14px solid #4fe0ff; filter: drop-shadow(0 0 2px #000); }
-    body.night #mapCanvas { filter: brightness(0.6); }
+      color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+    #map3d.big #mapClose { display: block; }
     #hint { top: 80px; left: 50%; transform: translateX(-50%); display: none; }
+    /* Frame time is the closest an ordinary web page gets to a CPU-load reading —
+       browsers don't expose real OS CPU percentage — but a rising number here means
+       the same thing: something is taking longer to compute or draw each frame. */
+    #debugBar { padding: 5px 10px; font-size: 10px; opacity: 0.6; display: flex; gap: 6px; letter-spacing: 0.04em; }
+    #debugBar:hover { opacity: 0.95; }
     #hint.show { display: block; }
     #autopilot.on { background: rgba(79, 208, 255, 0.28); border-color: rgba(79, 208, 255, 0.7); }
     #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #fbeee0; background: #3a1b10; letter-spacing: 0.2em; transition: opacity 0.6s; }
@@ -119,36 +114,22 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.40 · тіні від дальнього світла</span></div>
-    <div id="nav" class="panel">
-    <div class="navTop"><div id="navArrow">&#10148;</div><div><b id="navName">БЕТА</b><div id="navDist">0 м</div><div id="navRoad"></div></div></div>
-    <div class="gauge navGauge"><i id="navBar"></i></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.54 · світло стовпчиків видно здалеку</span></div>
+    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span></div>
   </div>
-    <div id="map">
-    <div id="mapView">
-      <canvas id="mapCanvas"></canvas>
-      <canvas id="routeCanvas"></canvas>
-      <div id="mapMarker"></div>
-      <button id="mapClose" title="Закрити">&times;</button>
-    </div>
+  <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="56"></canvas></div>
+  <div id="map3d" class="panel">
+    <canvas id="map3dCanvas"></canvas>
+    <canvas id="map3dOverlay"></canvas>
+    <button id="mapClose" title="Закрити">&times;</button>
     <div id="mapBar">
-      <span id="routeInfo">Маршрут порожній — клацай, щоб ставити точки</span>
+      <span id="routeInfo">Маршрут порожній — клацай по карті, щоб ставити точки</span>
       <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button></span>
     </div>
-  </div>
   </div>
   <div id="telemetry" class="panel">
     <div id="speed">0 км/год</div>
     <div id="mode"></div>
-    <div id="susp">
-      <div><div class="bar"><i id="susp-FL"></i></div>FL</div>
-      <div><div class="bar"><i id="susp-FR"></i></div>FR</div>
-      <div><div class="bar"><i id="susp-RL"></i></div>RL</div>
-      <div><div class="bar"><i id="susp-RR"></i></div>RR</div>
-    </div>
-    <div class="cap">стиснення підвіски</div>
-    <div class="row"><span>КЕРМО</span><b id="steerDeg">0°</b></div>
-    <div class="steerBar"><i id="steerFill"></i></div>
     <hr>
     <div class="row"><span>БАТАРЕЯ</span><b id="battery">100%</b></div>
     <div class="gauge"><i id="batteryBar"></i></div>
@@ -164,6 +145,7 @@
     <div class="menuHead">
       <div class="tabs">
         <button class="tab on" data-tab="settings">Налаштування</button>
+        <button class="tab" data-tab="gfx">Графіка</button>
         <button class="tab" data-tab="keys">Клавіші</button>
       </div>
       <button id="menuClose" title="Закрити">&times;</button>
@@ -185,11 +167,20 @@
       </div>
     </div>
 
+    <div id="tab-gfx" class="tabBody">
+      <div class="secTitle">Графіка</div>
+      <label><span>Видимість</span><input id="viewDist" type="range" min="50" max="200" value="100"><b id="viewDistV">100%</b></label>
+      <div class="btnRow">
+        <button id="shadowsToggle" class="on">Тіні: увімк</button>
+        <button id="dynLightToggle" class="on">Динамічне світло: увімк</button>
+      </div>
+    </div>
+
     <div id="tab-keys" class="tabBody">
       <div class="secTitle">Рух</div>
       <div class="keyRow"><span><kbd>W</kbd></span>газ</div>
       <div class="keyRow"><span><kbd>S</kbd></span>гальмо, далі задній хід</div>
-      <div class="keyRow"><span><kbd>A</kbd> <kbd>D</kbd></span>кермо — тримає кут, обидві разом ставлять прямо</div>
+      <div class="keyRow"><span><kbd>A</kbd> <kbd>D</kbd></span>кермо — відпусти, щоб повернути прямо</div>
       <div class="keyRow"><span><kbd>Пробіл</kbd></span>ручне гальмо</div>
       <div class="keyRow"><span><kbd>Shift</kbd></span>турбо, жере батарею вчетверо</div>
       <div class="secTitle">Ровер</div>
@@ -201,7 +192,7 @@
       <div class="secTitle">Інтерфейс</div>
       <div class="keyRow"><span><kbd>O</kbd></span>це меню</div>
       <div class="keyRow"><span><kbd>K</kbd></span>звук</div>
-      <div class="keyRow"><span><kbd>M</kbd></span>карта маршруту</div>
+      <div class="keyRow"><span><kbd>M</kbd></span>3D-карта — клац по ній відкриває маршрут</div>
       <div class="keyRow"><span><kbd>J</kbd></span>камінці з-під коліс</div>
       <div class="keyRow"><span>миша</span>обертати камеру, колесо — зум</div>
     </div>
