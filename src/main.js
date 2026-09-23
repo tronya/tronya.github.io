@@ -238,14 +238,14 @@ for (const side of [-1, 1]) {
 }
 // The roof bar is a long-range spot: a narrow, strong beam that reaches far ahead of
 // the two headlights. It is on with full headlights only.
-const farLight = new THREE.SpotLight(0xfff6e4, 0, 320, 0.13, 0, 2);
+const farLight = new THREE.SpotLight(0xfff6e4, 0, 800, 0.13, 0, 2);
 farLight.position.set(0, 1.4, 2.0);
 // It casts shadows too, so rocks far down the beam are not flat blobs. The narrow cone
 // keeps the map sharp: ~1 cm per texel a hundred metres out.
 farLight.castShadow = true;
 farLight.shadow.mapSize.set(1024, 1024);
 farLight.shadow.camera.near = 2;
-farLight.shadow.camera.far = 350;
+farLight.shadow.camera.far = 850;
 farLight.shadow.bias = -0.0003;
 farLight.shadow.normalBias = 0.05;
 // The bar is a rectangle, so the beam is too: project a soft-edged wide rectangle
@@ -273,7 +273,7 @@ farLight.shadow.normalBias = 0.05;
   farLight.map = tex;
 }
 const farAim = new THREE.Object3D();
-farAim.position.set(0, -0.8, 110);
+farAim.position.set(0, -0.8, 280);
 farLight.target = farAim;
 vehicle.root.add(farLight, farAim);
 const farUpLocal = new THREE.Vector3(0, 1, 0); // the truck's own up, before rotation
@@ -347,7 +347,7 @@ function lampLevel() {
 }
 
 const HEAD_INTENSITY = 2200;
-const FAR_INTENSITY = 20000;
+const FAR_INTENSITY = 125000; // scaled with range^2 (decay=2) to stay as bright at the new 800 m cutoff
 function setLamps(level) {
   const marks = level >= 1;
   const heads = level >= 2;

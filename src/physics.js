@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { groundHeight } from './terrain.js';
-import { WHEEL_R, WHEEL_X, AXLE_Z, WHEELBASE, SUSP, ackermann } from './vehicle.js';
+import { WHEEL_R, WHEEL_X, AXLE_Z, SUSP, ackermann } from './vehicle.js';
 
 // Rigid-body vehicle in SI units on Mars gravity. The body has mass, inertia and a
 // high centre of mass; every wheel has a spring/damper, tyre friction limited by the
@@ -48,26 +48,28 @@ const CLIMB_FLOOR = 2.5;
 // Below this the suspension axis is too horizontal to reach the ground at all.
 const UP_MIN = 0.5;
 const UP_FADE = 0.8;
-const F_DRIVE = 26000; // total, all four wheels
-const POWER = 180000;
-const V_MAX = 12; // ~43 km/h cruising
-const V_MAX_BOOST = 22; // Shift only, and it drinks the battery
+// Scaled up along with V_MAX_RWD below — the old 180 kW/26 kN pair could only ever
+// hold the rover to ~45 km/h against its own rolling/regolith resistance, however
+// high the speed cap was set; pushing a heavy rover to 100 needs real power behind it.
+const F_DRIVE = 58000; // total, all four wheels
+const POWER = 520000;
+const V_MAX = 12; // ~43 km/h cruising, AWD mode only
+const V_MAX_BOOST = 34; // Shift only, and it drinks the battery — stays above V_MAX_RWD
 const V_MAX_REVERSE = 6;
 // Below AWD_UP the front axle stays engaged for traction over rough ground; past it
 // the front hubs disengage and only the rear wheels drive — less drivetrain to spin
 // up, so it clears a bit more top speed, and main.js reads `sim.awd` to cut the
 // battery draw to match. Separate up/down thresholds (hysteresis) so cruising right
 // at the switch point doesn't clatter the front axle in and out every second.
-const AWD_UP = 20 / 3.6;
-const AWD_DOWN = 16 / 3.6;
-const V_MAX_RWD_BONUS = 1.12;
+const AWD_UP = 40 / 3.6;
+const AWD_DOWN = 36 / 3.6;
+const V_MAX_RWD = 100 / 3.6; // ~28 m/s — the whole point of dropping the front axle
 // Steering behaves like a wheel, not a spring: the angle stays where it is left.
 const MECH_STEER = 0.56; // mechanical lock at the knuckle
 // Time to wind the wheel from centre to full lock. Scaling the rate to the current
 // lock keeps that time the same at any speed; a fixed rad/s hit the (small) lock at
 // speed in a fifth of a second, so a tap was full opposite lock.
 const STEER_LOCK_TIME = 0.95;
-const STEER_GRIP = 0.88; // fraction of available grip the lock is allowed to demand
 const BRAKE_FORCE = 3.2 * CORNER; // per wheel
 // Regolith is soft: a rover that stops pulling slows down noticeably. The linear
 // term is rolling resistance, the quadratic one stands in for churning through dust.
@@ -256,11 +258,10 @@ export class VehicleSim {
     c.brake = brake;
     c.boost = !!input.boost;
     c.parked = throttle === 0 && brake === 0 && this.vel.length() < 1.2 && this.upY > 0.7;
-    // Cap the lock at what the tyres can actually deliver. Letting the wheels turn
-    // further than that just scrubs the fronts and the rover ploughs straight on,
-    // which is what made the steering feel like a formality at speed.
-    const aLat = MU * GRAVITY * STEER_GRIP;
-    const maxSteer = Math.min(MECH_STEER, Math.atan((aLat * WHEELBASE) / Math.max(v * v, 4)));
+    // Full mechanical lock at any speed — no speed-scaled cap. Crank the wheel hard
+    // at speed now and the tyres can't deliver that turn radius; the rover slides,
+    // trips over its own grip and can genuinely roll, instead of being kept safe.
+    const maxSteer = MECH_STEER;
     this.maxSteer = maxSteer;
     if (input.steerTo !== undefined) {
       c.steer = damp(c.steer, clamp(input.steerTo, -1, 1) * maxSteer, 5, dt);
@@ -287,8 +288,7 @@ export class VehicleSim {
 
   driveForce(thr, speed) {
     const boost = this.cmd.boost;
-    let vmax = thr > 0 ? (boost ? V_MAX_BOOST : V_MAX) : V_MAX_REVERSE;
-    if (!this.awd && thr > 0 && !boost) vmax *= V_MAX_RWD_BONUS;
+    let vmax = thr > 0 ? (boost ? V_MAX_BOOST : this.awd ? V_MAX : V_MAX_RWD) : V_MAX_REVERSE;
     const fmax = boost ? F_DRIVE * 1.4 : F_DRIVE;
     let f = Math.min(fmax, (boost ? POWER * 1.4 : POWER) / Math.max(Math.abs(speed), 2));
     if (thr * speed >= 0) f *= 1 - smoothstep(0.8 * vmax, vmax, Math.abs(speed));
@@ -457,7 +457,17 @@ export class VehicleSim {
     // Pass 2: suspension + tyre forces at each contact patch.
     for (const w of wheels) {
       if (!w.contact) {
-        w.spinRate *= 0.995;
+        // Nothing to grip in the air, so the tyre isn't held to road speed like it
+        // is on the ground. Off throttle it just freewheels (only bearing drag);
+        // under throttle it spins up fast with no resistance holding it back — the
+        // classic off-road look. It was snapping toward a stop every jump before,
+        // which read as an unwanted ABS/traction-control mid-air.
+        if (cmd.throttle !== 0) {
+          const freeMax = (V_MAX_BOOST * 1.5) / WHEEL_R;
+          w.spinRate = clamp(w.spinRate + Math.sign(cmd.throttle) * freeMax * 5 * h, -freeMax, freeMax);
+        } else {
+          w.spinRate *= 0.9995;
+        }
         continue;
       }
       // Rock too tall to mount: resist the wheel's horizontal motion. Purely
