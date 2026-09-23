@@ -791,7 +791,7 @@ function autopilotInput() {
   // A hard swerve at full speed is how it nearly tipped over — bleed off real speed
   // (not just throttle) once the dodge gets serious, so the turn happens slower.
   return {
-    throttle: clamp((10.5 - sim.speed) * 0.6, -1, 1) * (1 - 0.7 * dodgeLoad),
+    throttle: clamp((12.5 - sim.speed) * 0.6, -1, 1) * (1 - 0.7 * dodgeLoad),
     steerTo: clamp(wrapAngle(want - sim.yaw()) * 1.5, -1, 1),
     brake: dodgeLoad > 0.55 ? (dodgeLoad - 0.55) * 1.4 : 0,
     boost: false,
