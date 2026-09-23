@@ -1,5 +1,6 @@
 import { BASES, BASE_FLAT_R } from './terrain.js';
 import { PLANET } from './planet.js';
+import { progress } from './progress.js';
 
 // Spend at БЕТА's workshop: мотлох found on the map, plus Гермес-3 modules actually
 // delivered (worth more — there are only 4 of those, ever). Two kinds of branch:
@@ -43,12 +44,12 @@ export function createUpgrades(debris, missions) {
   const state = loadState();
   for (const b of BRANCHES) if (!(b.id in state.levels)) state.levels[b.id] = 0;
 
-  // Moon and Верданта aren't played with мотлох and a workshop at all — the Moon is
-  // the plain stock rover on purpose (a control case), Верданта is the showcase, so
-  // it's simply handed the top of every branch. Only Mars reads the real save.
+  // The Moon chapter is a flashback to before any of this existed, so it is always
+  // the bare rover whatever the save says — that restriction is the level. Everywhere
+  // else you drive the rover you actually built, Верданта included: carrying your
+  // upgrades to the next planet is the whole point of earning them.
   const level = (id) => {
     if (PLANET === 'moon') return 0;
-    if (PLANET === 'verdanta') return BY_ID[id].vals.length - 1;
     return state.levels[id] || 0;
   };
   const mul = (id) => BY_ID[id].vals[level(id)];
@@ -58,7 +59,9 @@ export function createUpgrades(debris, missions) {
     for (const b of BRANCHES) for (let i = 0; i < level(b.id); i++) s += b.costs[i];
     return s;
   };
-  const currency = () => debris.collectedCount() + missions.deliveredCount() * MODULE_VALUE - spent();
+  // Scrap found on the map, modules delivered, plus whatever the campaign has handed
+  // out for story beats (see progress.js — the Moon flashback pays out this way).
+  const currency = () => debris.collectedCount() + missions.deliveredCount() * MODULE_VALUE + progress.bonusScrap - spent();
   const nextCost = (id) => {
     const b = BY_ID[id];
     const lv = level(id);

@@ -64,6 +64,23 @@
     .keyRow { display: flex; gap: 10px; font-size: 11px; line-height: 1.75; opacity: 0.92; }
     .keyRow span { flex: 0 0 96px; }
     #version { display: block; margin-top: 3px; font-size: 10px; opacity: 0.6; }
+    /* Start screen. Sits over the world, which is already built behind it, so
+       "Продовжити" is instant; only "Нова гра" needs the reload. */
+    #startMenu { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center;
+      justify-content: center; background: rgba(12, 6, 4, 0.82); backdrop-filter: blur(3px); }
+    #startMenu.hidden { display: none; }
+    #startCard { text-align: center; padding: 34px 46px; }
+    #startCard b { display: block; font-size: 26px; letter-spacing: 0.26em; margin-bottom: 6px; }
+    #startTag { display: block; font-size: 11px; opacity: 0.7; letter-spacing: 0.1em; margin-bottom: 4px; }
+    #startWhere { display: block; font-size: 11px; opacity: 0.55; margin-bottom: 22px; }
+    #startCard button { display: block; width: 100%; margin-top: 9px; padding: 11px 26px;
+      background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 210, 170, 0.34);
+      color: inherit; font: inherit; font-size: 13px; letter-spacing: 0.16em; border-radius: 6px; cursor: pointer; }
+    #startCard button:hover { background: rgba(79, 208, 255, 0.2); border-color: rgba(79, 208, 255, 0.6); }
+    #startCard button.ghost { opacity: 0.6; font-size: 11px; letter-spacing: 0.1em; }
+    /* Locked planets stay visible so you can see there is more to come. */
+    #planetRow button.locked { opacity: 0.38; cursor: not-allowed; }
+    #chapter { display: block; margin-top: 6px; font-size: 10.5px; opacity: 0.8; color: #ffd9a8; }
     @media (max-width: 1100px) { #lamps, #sound { display: none; } }
     /* The 3D relief map parks small in the bottom-left corner, turning slowly on its
        own — a tap opens it into a big, orbitable dialog where you can plot a route. */
@@ -129,7 +146,15 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span id="titleSub">перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.96 · ровер контактує з водою: бризки з коліс, хвилі-сліди, опір руху</span></div>
+    <div id="startMenu" class="hidden"><div id="startCard" class="panel">
+      <b>SOLAR ROVER</b>
+      <span id="startTag">сонячний ровер · Гермес-3</span>
+      <span id="startWhere"></span>
+      <button id="btnContinue">ПРОДОВЖИТИ</button>
+      <button id="btnNewGame">НОВА ГРА</button>
+      <button id="btnWipe" class="ghost">стерти збереження</button>
+    </div></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span id="titleSub">перехід АЛЬФА → БЕТА · ~10 км</span><span id="chapter"></span><span id="version">v1.0 · це вже гра: нова гра / продовжити, кампанія Марс → Верданта, флешбек на Місяці</span></div>
     <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span></div>
   </div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="56"></canvas></div>
@@ -190,8 +215,8 @@
       <div class="secTitle">Планета (перезавантажить сторінку)</div>
       <div class="btnRow" id="planetRow">
         <button id="planet-mars" class="on">Марс</button>
-        <button id="planet-moon">Місяць (тест, порожній)</button>
-        <button id="planet-verdanta">Верданта (тест, порожня)</button>
+        <button id="planet-moon">Місяць · флешбек</button>
+        <button id="planet-verdanta">Верданта</button>
       </div>
     </div>
 

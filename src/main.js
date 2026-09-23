@@ -10,6 +10,8 @@ import { createSand } from './sand.js';
 import { createGrass } from './grass.js';
 import { createWater } from './water.js';
 import { createSplash } from './splash.js';
+import { createFlashback } from './flashback.js';
+import { progress, hasSave, newGame, travelTo, consumeSkipMenu, FLASHBACK_AT, FLASHBACK_REWARD } from './progress.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
 import { createDebris } from './debris.js';
@@ -231,6 +233,8 @@ const water = createWater(); // the river surface; also a no-op off Вердан
 scene.add(water.group);
 const splash = createSplash(); // spray off the wheels, same deal
 scene.add(splash.group);
+const flashback = createFlashback(); // the Гермес-1 wreck; only exists on the Moon
+scene.add(flashback.group);
 scene.add(tracks.mesh);
 
 const sim = new VehicleSim();
@@ -483,16 +487,76 @@ for (const tab of document.querySelectorAll('#menu .tab')) {
 document.getElementById('mapToggle').addEventListener('click', toggleMap);
 document.getElementById('sandToggle').addEventListener('click', toggleSand);
 
-// ---------- planet select (reloads — see physics.js's PLANET/GRAVITY) ----------
-const PLANET_SUBTITLE = { moon: 'Місяць · порожній тестовий світ', verdanta: 'Верданта · вигадана планета, тестовий світ' };
-if (PLANET_SUBTITLE[PLANET]) document.getElementById('titleSub').textContent = PLANET_SUBTITLE[PLANET];
+// ---------- the campaign: where you are, what is open, and how to travel ----------
+// Travel reloads the page, because planet.js and everything derived from it (gravity,
+// terrain, sky, the mission and debris pools) is read once at module load.
+const PLANET_SUBTITLE = {
+  mars: 'перехід АЛЬФА → БЕТА · ~10 км',
+  moon: 'ФЛЕШБЕК · Місяць · уламки Гермес-1',
+  verdanta: 'Верданта · перша висадка',
+};
+const PLANET_NAME = { mars: 'Марс', moon: 'Місяць', verdanta: 'Верданта' };
+document.getElementById('titleSub').textContent = PLANET_SUBTITLE[PLANET];
+const chapterEl = document.getElementById('chapter');
+
+function refreshPlanets() {
+  const done = missions.deliveredCount();
+  for (const p of ['mars', 'moon', 'verdanta']) {
+    const btn = document.getElementById(`planet-${p}`);
+    const open = progress.unlocked(p, done);
+    btn.classList.toggle('on', p === PLANET);
+    btn.classList.toggle('locked', !open);
+    btn.disabled = !open;
+    if (p === 'moon' && !open) btn.textContent = `Місяць · флешбек (${done}/${FLASHBACK_AT})`;
+    else if (p === 'moon') btn.textContent = progress.flashbackDone ? 'Місяць · флешбек ✓' : 'Місяць · флешбек';
+    if (p === 'verdanta') btn.textContent = open ? 'Верданта' : `Верданта (${done}/4 модулів)`;
+  }
+}
+
+function refreshChapter() {
+  const done = missions.deliveredCount();
+  if (PLANET === 'moon') {
+    chapterEl.textContent = progress.flashbackDone ? 'Флешбек пройдено' : 'Знайти уламки Гермес-1';
+  } else if (PLANET === 'verdanta') {
+    chapterEl.textContent = 'Розділ 2 · нова земля';
+  } else {
+    chapterEl.textContent = done >= 4 ? 'Розділ 1 пройдено · Верданта відкрита' : `Розділ 1 · модулі ${done}/4`;
+  }
+}
+
 for (const p of ['mars', 'moon', 'verdanta']) {
-  const btn = document.getElementById(`planet-${p}`);
-  btn.classList.toggle('on', p === PLANET);
-  btn.addEventListener('click', () => {
-    if (p === PLANET) return;
-    try { localStorage.setItem('rover.planet', p); } catch (e) { /* storage may be blocked */ }
-    location.reload();
+  document.getElementById(`planet-${p}`).addEventListener('click', () => {
+    if (p === PLANET || !progress.unlocked(p, missions.deliveredCount())) return;
+    travelTo(p);
+  });
+}
+refreshPlanets();
+refreshChapter();
+
+// ---------- start screen ----------
+// The world behind this is already built, so Продовжити is instant; only Нова гра
+// has to reload, because the save is read once on the way in.
+const startMenu = document.getElementById('startMenu');
+let menuOpen = false;
+{
+  const where = document.getElementById('startWhere');
+  const btnContinue = document.getElementById('btnContinue');
+  const btnWipe = document.getElementById('btnWipe');
+  if (!consumeSkipMenu()) {
+    menuOpen = true;
+    startMenu.classList.remove('hidden');
+    const saved = hasSave();
+    btnContinue.style.display = saved ? '' : 'none';
+    btnWipe.style.display = saved ? '' : 'none';
+    where.textContent = saved
+      ? `${PLANET_NAME[PLANET]} · модулі ${missions.deliveredCount()}/4 · мотлох ${upgrades.currency()}`
+      : 'нова експедиція';
+  }
+  const close = () => { menuOpen = false; startMenu.classList.add('hidden'); progress.markStarted(); };
+  btnContinue.addEventListener('click', close);
+  document.getElementById('btnNewGame').addEventListener('click', newGame);
+  btnWipe.addEventListener('click', () => {
+    if (confirm('Стерти збереження? Прогрес, апгрейди й мотлох буде втрачено.')) newGame();
   });
 }
 
@@ -1003,6 +1067,13 @@ const dbgMsEl = document.getElementById('dbgMs');
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  if (menuOpen) {
+    // Hold everything — clock included — so the sol does not run and the battery
+    // does not drain while the player is still deciding.
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+    return;
+  }
   const t = clock.elapsedTime;
 
   // Scanned from last frame's position — one frame of lag, not worth chasing — so
@@ -1213,6 +1284,16 @@ function frame() {
   sandCtx.tail.x = sim.pos.x - fx * 3.4;
   sandCtx.tail.y = sim.pos.y - 0.4;
   sandCtx.tail.z = sim.pos.z - fz * 3.4;
+  if (PLANET === 'moon') {
+    const fb = flashback.update(dt, sim.pos.x, sim.pos.z);
+    if (fb && progress.finishFlashback()) {
+      flash(`ГЕРМЕС-1 ЗНАЙДЕНО · +${FLASHBACK_REWARD} мотлоху`);
+      if (audio) { audio.beep(880); setTimeout(() => audio.beep(1320), 150); }
+      refreshChapter();
+      refreshPlanets();
+    }
+  }
+
   sand.update(dt, sandCtx);
   grass.update(dt, sandCtx);
   water.update(dt, sandCtx);
@@ -1226,6 +1307,18 @@ function frame() {
     if (missionEvent) {
       flash(missionEvent.text);
       if (audio) { audio.beep(missionEvent.type === 'deliver' ? 1180 : 780); if (missionEvent.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
+      // A delivery can open the next chapter. `firstTime` keeps each announcement to
+      // one, since this runs again on every reload with the same modules banked.
+      if (missionEvent.type === 'deliver') {
+        refreshPlanets();
+        refreshChapter();
+        const done = missions.deliveredCount();
+        if (done >= 4 && progress.firstTime('verdantaOpen')) {
+          setTimeout(() => flash('ВЕРДАНТА ВІДКРИТА · меню → Налаштування → планета'), 2800);
+        } else if (done >= FLASHBACK_AT && progress.firstTime('moonOpen')) {
+          setTimeout(() => flash('АРХІВ РОЗБЛОКОВАНО · флешбек: Місяць'), 2800);
+        }
+      }
     }
     hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
 
