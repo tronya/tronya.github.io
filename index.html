@@ -36,10 +36,11 @@
     #compass { top: 16px; left: 50%; transform: translateX(-50%); padding: 0;
       background: none; border: none; backdrop-filter: none; }
     #compassCanvas { display: block; }
-    #autopilot, #reset, #menuBtn { bottom: 16px; cursor: pointer; font: inherit; font-size: 12px; letter-spacing: 0.06em; }
+    #autopilot, #reset, #menuBtn, #camBtn { bottom: 16px; cursor: pointer; font: inherit; font-size: 12px; letter-spacing: 0.06em; }
     #autopilot { right: 16px; }
     #reset { right: 170px; }
     #menuBtn { right: 324px; }
+    #camBtn { right: 428px; }
     #menu { display: none; right: 16px; bottom: 60px; width: 330px; max-height: 74vh; overflow-y: auto; }
     #menu.show { display: block; }
     .menuHead { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -114,7 +115,7 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.54 · світло стовпчиків видно здалеку</span></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.63 · пил кольору ґрунту під колесами</span></div>
     <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span></div>
   </div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="56"></canvas></div>
@@ -134,6 +135,7 @@
     <div class="row"><span>БАТАРЕЯ</span><b id="battery">100%</b></div>
     <div class="gauge"><i id="batteryBar"></i></div>
     <div class="row"><span id="panelState">КРИЛА: СКЛАДЕНІ</span><b id="powerFlow">0.00 %/с</b></div>
+    <div class="row"><span>МОДУЛІ ГЕРМЕС-3</span><b id="missionStat">везеш 0 · здано 0/4</b></div>
     <div class="row" id="odoRow" title="Клац — обнулити поїздку"><span>ПОЇЗДКА</span><b id="odoTrip">0 м</b></div>
     <div class="row sol"><span>ПРОБІГ ВСЬОГО</span><b id="odoTotal">0 м</b></div>
     <div class="row sol"><span>СОЛ</span><b id="clock">00:00</b></div>
@@ -194,13 +196,15 @@
       <div class="keyRow"><span><kbd>K</kbd></span>звук</div>
       <div class="keyRow"><span><kbd>M</kbd></span>3D-карта — клац по ній відкриває маршрут</div>
       <div class="keyRow"><span><kbd>J</kbd></span>камінці з-під коліс</div>
-      <div class="keyRow"><span>миша</span>обертати камеру, колесо — зум</div>
+      <div class="keyRow"><span><kbd>C</kbd></span>камера: ближня / дальня / згори / оберт</div>
+      <div class="keyRow"><span>миша</span>обертати камеру, колесо — зум (в режимах ближня/дальня)</div>
     </div>
   </div>
 
   <button id="menuBtn" class="panel">Меню (O)</button>
   <button id="reset" class="panel">На колеса (R)</button>
   <button id="autopilot" class="panel">Автопілот (P)</button>
+  <button id="camBtn" class="panel">Камера: ближня (C)</button>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

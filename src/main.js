@@ -8,6 +8,8 @@ import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
 import { createRoadPosts } from './roadposts.js';
+import { createMissions } from './missions.js';
+import { createDustTrail } from './dust.js';
 import { createMinimap3D } from './minimap3d.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
@@ -27,9 +29,19 @@ const CHARGE_PEAK = 1.5; // %/s with the wings open and the sun overhead
 const PANEL_SECONDS = 2.6; // time to unfold or stow
 const LOW_BATTERY = 20;
 const BOOST_DRAW = 4.5; // Shift is fast but drinks the pack
-// Default camera: high behind the truck, looking down at it.
+// Default camera: low behind the truck.
 const CAM_BACK = 13;
-const CAM_UP = 20;
+const CAM_UP = 2;
+// Cinematic camera modes, cycled with C. Chase/far still turn with the truck's
+// heading and can be dragged/zoomed by hand (same trick as the default camera);
+// top-down and orbit are fully automatic and lock out manual control.
+const CAM_MODES = ['chase', 'far', 'top', 'orbit'];
+const CAM_FAR_BACK = 34;
+const CAM_FAR_UP = 13;
+const CAM_TOP_HEIGHT = 55;
+const CAM_ORBIT_RADIUS = 70;
+const CAM_ORBIT_HEIGHT = 35;
+const CAM_ORBIT_SPEED = 0.15; // rad/s, slow reveal, not a spin
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -77,8 +89,8 @@ scene.add(hemi);
 
 // Day and night are the two ends of a continuous cycle, blended by sun height.
 const LOOKS = {
-  day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, exposure: 1.0, dust: 0xc99a70, dustAlpha: 0.24 },
-  night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, exposure: 1.2, dust: 0x6b5545, dustAlpha: 0.2 },
+  day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, exposure: 1.0, dust: 0x9d6d44 },
+  night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, exposure: 1.2, dust: 0x5a3d2b },
 };
 const sunDir = new THREE.Vector3(0, 1, 0);
 const look = { ...LOOKS.night };
@@ -118,7 +130,6 @@ function applyTimeOfDay(timeOfDay) {
   look.hemi = lerp(n.hemi, d.hemi);
   look.env = lerp(n.env, d.env);
   look.exposure = lerp(n.exposure, d.exposure);
-  look.dustAlpha = lerp(n.dustAlpha, d.dustAlpha);
 
   updateSky(sky.material, sunDir, k);
   horizonColor(k, scene.fog.color);
@@ -130,7 +141,7 @@ function applyTimeOfDay(timeOfDay) {
   hemi.intensity = look.hemi;
   scene.environmentIntensity = look.env;
   mixC.setHex(n.dust).lerp(cB.setHex(d.dust), k);
-  for (const p of puffs) p.sprite.material.color.copy(mixC);
+  dust.setTint(mixC);
   document.body.classList.toggle('night', k < 0.35);
 
   // The environment probe is costly; refresh it only when the light really moved.
@@ -160,6 +171,8 @@ const drawSize = new THREE.Vector2();
 const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 } };
 const roadPosts = createRoadPosts();
 scene.add(roadPosts.group);
+const missions = createMissions();
+scene.add(missions.group);
 const sand = createSand();
 scene.add(sand.points);
 scene.add(tracks.mesh);
@@ -171,9 +184,11 @@ const sim = new VehicleSim();
 }
 const vehicle = buildVehicle();
 scene.add(vehicle.root);
-const W = vehicle.wheels.map((w, i) => ({ ...w, sim: sim.wheels[i], spinAngle: 0, dustAcc: 0 }));
+const W = vehicle.wheels.map((w, i) => ({ ...w, sim: sim.wheels[i], spinAngle: 0 }));
 
-// ---------- dust puffs ----------
+// ---------- dust trail ----------
+// A CanvasTexture for headlight glow/impact flashes elsewhere in this file — the
+// trailing dust cloud now has its own softer texture, see dust.js.
 function makeDustTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -186,23 +201,8 @@ function makeDustTexture() {
   return new THREE.CanvasTexture(c);
 }
 const dustTex = makeDustTexture();
-const puffs = Array.from({ length: 120 }, () => {
-  const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: dustTex, color: 0xc99a70, transparent: true, opacity: 0, depthWrite: false })
-  );
-  sprite.visible = false;
-  scene.add(sprite);
-  return { sprite, life: 0, max: 1, vel: new THREE.Vector3() };
-});
-let puffCursor = 0;
-
-function spawnPuff(x, y, z, drift) {
-  const p = puffs[puffCursor++ % puffs.length];
-  p.life = p.max = 0.9 + Math.random() * 0.6;
-  p.sprite.position.set(x, y, z);
-  p.vel.set((Math.random() - 0.5) * 0.5, 0.3 + Math.random() * 0.4, (Math.random() - 0.5) * 0.5).addScaledVector(drift, 0.5);
-  p.sprite.visible = true;
-}
+const dust = createDustTrail();
+scene.add(dust.group);
 
 // ---------- headlights, cab glow ----------
 const headlights = [];
@@ -457,6 +457,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyH') return resetVehicle(true);
   if (e.code === 'KeyM') return toggleMap();
   if (e.code === 'KeyJ') return toggleSand();
+  if (e.code === 'KeyC') return cycleCamera();
   keys.add(e.code);
   if (DRIVE_KEYS.has(e.code)) {
     setAutopilot(false);
@@ -471,6 +472,7 @@ const odo = { trip: 0, total: 0, last: null, savedAt: 0 };
 try { odo.total = Number(localStorage.getItem('rover.odo')) || 0; } catch (e) { /* storage may be blocked */ }
 const hudOdoTrip = document.getElementById('odoTrip');
 const hudOdoTotal = document.getElementById('odoTotal');
+const hudMissions = document.getElementById('missionStat');
 const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
 document.getElementById('odoRow').addEventListener('click', () => { odo.trip = 0; });
 function stepOdometer(t) {
@@ -589,7 +591,7 @@ const route = [];
 const WAYPOINT_R = 40;
 const map3dEl = document.getElementById('map3d');
 const routeInfo = document.getElementById('routeInfo');
-const minimap = createMinimap3D(document.getElementById('map3dCanvas'), document.getElementById('map3dOverlay'));
+const minimap = createMinimap3D(document.getElementById('map3dCanvas'), document.getElementById('map3dOverlay'), missions.modules);
 
 function updateRouteInfo() {
   routeInfo.textContent = route.length
@@ -815,11 +817,33 @@ function readInput(t) {
 const origin = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
 const camOffset = new THREE.Vector3();
-const drift = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 let camYaw = sim.yaw();
 let camY = sim.pos.y;
 let flippedFor = 0;
+let camMode = 0;
+let orbitAngle = 0;
+const btnCamera = document.getElementById('camBtn');
+const CAM_LABEL = { chase: 'ближня', far: 'дальня', top: 'згори', orbit: 'оберт' };
+function presetOffset(mode, yaw) {
+  const [back, up] = mode === 'far' ? [CAM_FAR_BACK, CAM_FAR_UP] : [CAM_BACK, CAM_UP];
+  return new THREE.Vector3(-Math.sin(yaw) * back, up, -Math.cos(yaw) * back);
+}
+function setCamMode(i) {
+  camMode = ((i % CAM_MODES.length) + CAM_MODES.length) % CAM_MODES.length;
+  const mode = CAM_MODES[camMode];
+  controls.enabled = mode === 'chase' || mode === 'far';
+  if (mode === 'chase' || mode === 'far') {
+    camera.position.copy(camTarget).add(presetOffset(mode, camYaw));
+    controls.target.copy(camTarget);
+    controls.update();
+  } else if (mode === 'orbit') {
+    orbitAngle = camYaw;
+  }
+  btnCamera.textContent = `Камера: ${CAM_LABEL[mode]} (C)`;
+}
+function cycleCamera() { setCamMode(camMode + 1); }
+btnCamera.addEventListener('click', cycleCamera);
 
 camTarget.set(sim.pos.x, sim.pos.y + 0.5, sim.pos.z);
 controls.target.copy(camTarget);
@@ -870,36 +894,29 @@ function frame() {
     vehicle.setSuspension(i, Lvis);
     w.spin.rotation.x += s.spinRate * dt;
 
-    if (s.contact) {
-      w.dustAcc += (Math.abs(s.vx) + Math.abs(s.vy)) * dt * 0.9;
-      while (w.dustAcc >= 1) {
-        w.dustAcc -= 1;
-        drift.set(-Math.sin(sim.yaw()), 0, -Math.cos(sim.yaw())).multiplyScalar(Math.sign(s.vx) || 1);
-        spawnPuff(s.cx, s.g + 0.1, s.cz, drift);
-      }
-    }
   });
-  for (const p of puffs) {
-    if (p.life <= 0) continue;
-    p.life -= dt;
-    if (p.life <= 0) {
-      p.sprite.visible = false;
-      continue;
-    }
-    const k = 1 - p.life / p.max;
-    p.sprite.position.addScaledVector(p.vel, dt);
-    p.vel.multiplyScalar(1 - 1.5 * dt);
-    p.sprite.scale.setScalar(0.5 + k * 1.6);
-    p.sprite.material.opacity = look.dustAlpha * (1 - k);
-  }
 
-  // Chase camera: turns with the truck's heading (not its roll/pitch, so a flip doesn't spin the view).
+  // Camera: turns with the truck's heading (not its roll/pitch, so a flip doesn't spin
+  // the view). Chase/far keep the old drag-to-orbit trick; top/orbit drive the camera
+  // outright (see setCamMode/CAM_MODES).
   const prevYaw = camYaw;
   if (sim.upY > 0.2) camYaw += wrapAngle(sim.yaw() - camYaw) * (1 - Math.exp(-3 * dt));
   camY = damp(camY, sim.pos.y, 4, dt);
   camTarget.set(sim.pos.x, camY + 0.5, sim.pos.z);
-  camOffset.copy(camera.position).sub(controls.target).applyAxisAngle(UP, camYaw - prevYaw);
-  camera.position.copy(camTarget).add(camOffset);
+  const camModeName = CAM_MODES[camMode];
+  if (camModeName === 'chase' || camModeName === 'far') {
+    camOffset.copy(camera.position).sub(controls.target).applyAxisAngle(UP, camYaw - prevYaw);
+    camera.position.copy(camTarget).add(camOffset);
+  } else if (camModeName === 'top') {
+    camera.position.set(camTarget.x, camTarget.y + CAM_TOP_HEIGHT, camTarget.z + 0.01);
+  } else {
+    orbitAngle += dt * CAM_ORBIT_SPEED;
+    camera.position.set(
+      camTarget.x - Math.sin(orbitAngle) * CAM_ORBIT_RADIUS,
+      camTarget.y + CAM_ORBIT_HEIGHT,
+      camTarget.z - Math.cos(orbitAngle) * CAM_ORBIT_RADIUS
+    );
+  }
   controls.target.copy(camTarget);
   controls.update();
   const minCamY = groundHeight(camera.position.x, camera.position.z) + 0.5;
@@ -1018,7 +1035,15 @@ function frame() {
   sandCtx.head.dx = fx;
   sandCtx.head.dz = fz;
   sand.update(dt, sandCtx);
+  dust.update(dt, sandCtx);
   roadPosts.update(t, daylight, sandCtx.pxPerUnit, sim.pos);
+
+  const missionEvent = missions.update(t, sim.pos.x, sim.pos.z);
+  if (missionEvent) {
+    flash(missionEvent.text);
+    if (audio) { audio.beep(missionEvent.type === 'deliver' ? 1180 : 780); if (missionEvent.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
+  }
+  hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
 
   if (audio) {
     const contacts = W.filter((w) => w.sim.contact).length / 4;
@@ -1065,6 +1090,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, missions, dust, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

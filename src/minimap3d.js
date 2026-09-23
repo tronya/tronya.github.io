@@ -36,7 +36,7 @@ function arrowGeometry(len, wid) {
 }
 
 // canvas: the WebGL view. overlay: a plain 2D canvas stacked exactly on top of it.
-export function createMinimap3D(canvas, overlay) {
+export function createMinimap3D(canvas, overlay, missionModules = []) {
   const PAD = 240;
   const x0 = ROUTE_BOUNDS.x0 - PAD;
   const x1 = ROUTE_BOUNDS.x1 + PAD;
@@ -110,6 +110,18 @@ export function createMinimap3D(canvas, overlay) {
     m.rotation.y = Math.PI / 4;
     scene.add(m);
   }
+
+  // Mission modules: shown from the very start (no proximity reveal) so the player
+  // can plan their own route; each hides once picked up, same as its in-world crate.
+  const moduleMarkers = missionModules.map((m) => {
+    const mesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(markerUnit * 0.28),
+      new THREE.MeshBasicMaterial({ color: m.color })
+    );
+    mesh.position.set(m.x, terrainHeight(m.x, m.z) + markerUnit * 0.5, m.z);
+    scene.add(mesh);
+    return { mesh, m };
+  });
 
   const roverMarker = new THREE.Mesh(
     arrowGeometry(markerUnit * 0.5, markerUnit * 0.3),
@@ -282,6 +294,10 @@ export function createMinimap3D(canvas, overlay) {
     const y = terrainHeight(sim.pos.x, sim.pos.z) + markerUnit * 0.2;
     roverMarker.position.set(sim.pos.x, y, sim.pos.z);
     roverMarker.rotation.y = sim.yaw();
+    for (const { mesh, m } of moduleMarkers) {
+      mesh.visible = !m.collected;
+      mesh.rotation.y += dt * 0.8;
+    }
     renderer.render(scene, camera);
     drawWaypoints();
   }

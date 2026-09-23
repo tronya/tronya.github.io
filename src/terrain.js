@@ -545,37 +545,56 @@ function fillTile(geo, ox, oz, seg) {
     const z = oz + pos.getZ(k);
     // World-space UVs: the texture runs continuously across tile borders.
     uv.setXY(k, x / TEX_METERS, z / TEX_METERS);
-    const a = fbm(x * 0.03 + 40, z * 0.03 - 20, 3);
-    const m = fbm(x * 0.2, z * 0.2, 2);
-    // Very low frequency wash over hundreds of metres, which is what stops the eye
-    // from locking onto the texture tiling when looking into the distance.
-    const macro = fbm(x * 0.0022 + 900, z * 0.0022 - 400, 3);
-    const patch = fbm(x * 0.008 - 210, z * 0.008 + 77, 2);
-    _c.copy(dark).lerp(base, smooth(0.25, 0.6, a)).lerp(dust, smooth(0.5, 0.85, m) * 0.55);
-    _c.lerp(pale, smooth(0.46, 0.74, macro) * 0.5).lerp(rust, smooth(0.48, 0.72, patch) * 0.32);
-    // The graded road is paler, packed dust; off it the ground is darker and rockier.
-    const onRoad = 1 - smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
-    _c.lerp(roadCol, onRoad * 0.6);
-    // Widening the mountains' roughness earlier made ordinary rolling ground pick up
-    // enough small-scale slope to light this up too, so gentle hillsides across the
-    // whole off-road plain were reading as dark rock smudges from a distance. Only
-    // genuinely steep faces — mesa walls, crater rims, real cliffs — should tint.
-    const steep = smooth(0.24, 0.58, 1 - normal.getY(k));
-    if (steep > 0) {
-      // Sedimentary beds: broad layers with finer banding inside them, keyed to world
-      // height, so they run dead level right around a mesa the way real strata do.
-      const y = pos.getY(k);
-      const bed = Math.sin(y * 0.21 + a * 2.2);
-      const fine = Math.sin(y * 0.78 + a * 3.5);
-      const band = clamp(0.5 + 0.34 * bed + 0.16 * fine, 0, 1);
-      _c.lerp(rockCol, steep * (0.55 + 0.45 * (1 - band)));
-      _c.lerp(strata, steep * band * 0.6);
-    }
+    groundColorAt(x, z, pos.getY(k), nrmArr[k * 3 + 1], _c);
     col.setXYZ(k, _c.r, _c.g, _c.b);
   }
   col.needsUpdate = true;
   uv.needsUpdate = true;
   geo.computeBoundingSphere();
+}
+
+// The ground's own colour at a point — shared by the terrain mesh's vertex colours
+// above and by anything outside that wants to match it, like dust kicked up off it
+// (see dust.js), so a puff thrown up over these reddish mountains actually reads
+// reddish instead of always the same generic tan.
+function groundColorAt(x, z, y, normalY, out) {
+  const a = fbm(x * 0.03 + 40, z * 0.03 - 20, 3);
+  const m = fbm(x * 0.2, z * 0.2, 2);
+  // Very low frequency wash over hundreds of metres, which is what stops the eye
+  // from locking onto the texture tiling when looking into the distance.
+  const macro = fbm(x * 0.0022 + 900, z * 0.0022 - 400, 3);
+  const patch = fbm(x * 0.008 - 210, z * 0.008 + 77, 2);
+  out.copy(dark).lerp(base, smooth(0.25, 0.6, a)).lerp(dust, smooth(0.5, 0.85, m) * 0.55);
+  out.lerp(pale, smooth(0.46, 0.74, macro) * 0.5).lerp(rust, smooth(0.48, 0.72, patch) * 0.32);
+  // The graded road is paler, packed dust; off it the ground is darker and rockier.
+  const onRoad = 1 - smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
+  out.lerp(roadCol, onRoad * 0.6);
+  // Widening the mountains' roughness earlier made ordinary rolling ground pick up
+  // enough small-scale slope to light this up too, so gentle hillsides across the
+  // whole off-road plain were reading as dark rock smudges from a distance. Only
+  // genuinely steep faces — mesa walls, crater rims, real cliffs — should tint.
+  const steep = smooth(0.24, 0.58, 1 - normalY);
+  if (steep > 0) {
+    // Sedimentary beds: broad layers with finer banding inside them, keyed to world
+    // height, so they run dead level right around a mesa the way real strata do.
+    const bed = Math.sin(y * 0.21 + a * 2.2);
+    const fine = Math.sin(y * 0.78 + a * 3.5);
+    const band = clamp(0.5 + 0.34 * bed + 0.16 * fine, 0, 1);
+    out.lerp(rockCol, steep * (0.55 + 0.45 * (1 - band)));
+    out.lerp(strata, steep * band * 0.6);
+  }
+  return out;
+}
+
+// For callers outside the tile builder (no ready-made vertex normal): a cheap central
+// difference of the height field itself, same trick fillTile uses for lighting.
+const _gcEps = 0.6;
+export function groundColorAtXZ(x, z, out = new THREE.Color()) {
+  const y = terrainHeight(x, z);
+  const dx = (terrainHeight(x + _gcEps, z) - terrainHeight(x - _gcEps, z)) / (2 * _gcEps);
+  const dz = (terrainHeight(x, z + _gcEps) - terrainHeight(x, z - _gcEps)) / (2 * _gcEps);
+  const normalY = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
+  return groundColorAt(x, z, y, normalY, out);
 }
 
 function tileGeometry(seg) {
