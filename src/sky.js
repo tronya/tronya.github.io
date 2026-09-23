@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLANET } from './planet.js';
 
 // Fog colour and sky horizon are the same raw display values, so terrain fades
 // into the sky seamlessly (three applies fog after tone mapping).
@@ -17,6 +18,37 @@ export const PRESETS = {
     discB: 0.9998,
     disc: 3.0,
     dir: new THREE.Vector3(0.55, 0.48, 0.7).normalize(),
+  },
+  // No air to scatter sunlight into a blue (or butterscotch) dome — the Moon's sky
+  // is black at noon same as at midnight, stars and all, sun blazing in the middle
+  // of it. Only the ground and the vehicle read as "day" there; the sky never does.
+  moonDay: {
+    horizon: raw(0, 0, 0),
+    zenith: raw(0, 0, 0),
+    ground: raw(0, 0, 0),
+    tint: raw(1.0, 0.97, 0.92),
+    stars: 1,
+    glow: 0.05,
+    core: 0.3,
+    discA: 0.9992,
+    discB: 0.9998,
+    disc: 3.2,
+  },
+  // An actual atmosphere and cloud cover — the reference art is heavily overcast,
+  // so this is a flat, pale, low-contrast sky (no real cloud rendering, just a
+  // dome with almost no horizon-to-zenith gradient) with the sun a soft diffuse
+  // glow behind the cloud rather than a hard disc.
+  verdantaDay: {
+    horizon: raw(0.72, 0.74, 0.74),
+    zenith: raw(0.48, 0.53, 0.56),
+    ground: raw(0.26, 0.3, 0.28),
+    tint: raw(0.95, 0.97, 1.0),
+    stars: 0,
+    glow: 0.5,
+    core: 0.03,
+    discA: 0.985,
+    discB: 0.999,
+    disc: 0.4,
   },
   night: {
     horizon: raw(0.075, 0.062, 0.09),
@@ -50,6 +82,16 @@ export function createSkyMaterial() {
       discA: { value: 0.9993 },
       discB: { value: 0.9998 },
       disc: { value: 3 },
+      // A companion world in orbit, visible in the dome the same way the sun disc
+      // is — see `planetDirAt` below. Zero radius/glow (the defaults) means nothing
+      // is drawn, so this is harmless on planets that never set it.
+      planetDir: { value: new THREE.Vector3(0, 1, 0) },
+      planetTangent: { value: new THREE.Vector3(1, 0, 0) },
+      planetBitangent: { value: new THREE.Vector3(0, 0, 1) },
+      planetColorA: { value: new THREE.Color(0xe6e5e1) },
+      planetColorB: { value: new THREE.Color(0x4c4e53) },
+      planetR: { value: 0 },
+      planetGlow: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -70,12 +112,41 @@ export function createSkyMaterial() {
       uniform float discA;
       uniform float discB;
       uniform float disc;
+      uniform vec3 planetDir;
+      uniform vec3 planetTangent;
+      uniform vec3 planetBitangent;
+      uniform vec3 planetColorA;
+      uniform vec3 planetColorB;
+      uniform float planetR;
+      uniform float planetGlow;
       varying vec3 vDir;
 
       float hash31(vec3 p) {
         p = fract(p * 0.3183099 + 0.1);
         p *= 17.0;
         return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+      }
+
+      // Trilinear value noise off the same hash, for the companion planet's terrain —
+      // craters and continents, not the pinprick stars above.
+      float vnoise3(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n00 = mix(hash31(i), hash31(i + vec3(1, 0, 0)), f.x);
+        float n10 = mix(hash31(i + vec3(0, 1, 0)), hash31(i + vec3(1, 1, 0)), f.x);
+        float n01 = mix(hash31(i + vec3(0, 0, 1)), hash31(i + vec3(1, 0, 1)), f.x);
+        float n11 = mix(hash31(i + vec3(0, 1, 1)), hash31(i + vec3(1, 1, 1)), f.x);
+        return mix(mix(n00, n10, f.y), mix(n01, n11, f.y), f.z);
+      }
+      float fbm3(vec3 p) {
+        float s = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) {
+          s += a * vnoise3(p);
+          p *= 2.02;
+          a *= 0.5;
+        }
+        return s;
       }
 
       void main() {
@@ -98,30 +169,102 @@ export function createSkyMaterial() {
         float s = max(dot(d, sunDir), 0.0);
         col += tint * (pow(s, 6.0) * glow + pow(s, 60.0) * core);
         col += mix(vec3(1.0, 0.95, 0.85), tint, 0.5) * smoothstep(discA, discB, s) * disc;
+
+        // A small cratered world, fixed in the dome (see planetOrbit in sky.js) —
+        // rendered as a proper lit sphere, not a flat disc: (u, v) plus the implied
+        // depth sqrt(1 - r*r) give a real sphere normal in the planet's own frame,
+        // which is what makes the terminator (the lit/dark split) look right instead
+        // of the whole disc being evenly washed with colour.
+        if (planetR > 0.0) {
+          float ps = dot(d, planetDir);
+          vec3 rel = d - planetDir * ps;
+          float u = dot(rel, planetTangent);
+          float v = dot(rel, planetBitangent);
+          float maxSin = sqrt(max(1.0 - planetR * planetR, 1e-5));
+          vec2 disc = vec2(u, v) / maxSin;
+          float r2 = dot(disc, disc);
+          if (r2 < 1.05) {
+            float nz = sqrt(max(1.0 - min(r2, 1.0), 0.0));
+            vec3 normal = vec3(disc, nz); // in the (tangent, bitangent, planetDir) frame
+
+            // A few big continent-like blotches plus finer grain for craters/regolith.
+            vec3 sp = normal * 2.4 + 11.0;
+            float continents = fbm3(sp);
+            float grain = fbm3(normal * 13.0 + 40.0);
+            float shade = clamp(continents * 0.72 + grain * 0.28, 0.0, 1.0);
+            vec3 surfCol = mix(planetColorB, planetColorA, smoothstep(0.3, 0.7, shade));
+
+            // Fold sunDir into the planet's own frame with three dots instead of a
+            // matrix, then light the sphere normal against it like any other surface.
+            vec3 sunLocal = vec3(dot(planetTangent, sunDir), dot(planetBitangent, sunDir), dot(planetDir, sunDir));
+            float lit = clamp(dot(normal, sunLocal), 0.0, 1.0);
+            // Almost no atmosphere means almost nothing scatters light onto the dark
+            // side — it should read close to black, not a dim grey crescent.
+            vec3 litCol = surfCol * (0.02 + 0.98 * lit);
+
+            // A real body blocks whatever is behind it — mix (replace), not add, or
+            // it reads as a translucent smear of light instead of a solid disc.
+            float edge = smoothstep(1.0, 0.965, r2);
+            col = mix(col, litCol, edge);
+            col += planetColorA * pow(max(ps, 0.0), 80.0) * planetGlow * (1.0 - edge);
+          }
+        }
         gl_FragColor = vec4(col, 1.0);
       }
     `,
   });
 }
 
+const DAY = PLANET === 'moon' ? PRESETS.moonDay : PLANET === 'verdanta' ? PRESETS.verdantaDay : PRESETS.day;
+
 // Blend the two presets by how high the sun is, so dusk and dawn pass through
 // smoothly instead of snapping between day and night.
 const _c = new THREE.Color();
-export function updateSky(material, sunDir, daylight) {
+export function updateSky(material, sunDir, daylight, planet) {
   const u = material.uniforms;
-  const d = PRESETS.day;
+  const d = DAY;
   const n = PRESETS.night;
   u.sunDir.value.copy(sunDir).normalize();
   u.horizon.value.copy(n.horizon).lerp(_c.copy(d.horizon), daylight);
   u.zenith.value.copy(n.zenith).lerp(_c.copy(d.zenith), daylight);
   u.ground.value.copy(n.ground).lerp(_c.copy(d.ground), daylight);
   u.tint.value.copy(n.tint).lerp(_c.copy(d.tint), daylight);
-  u.stars.value = 1 - Math.min(1, daylight * 1.6);
+  // No air to fade the stars out behind a lit sky, so on the Moon they never dim.
+  u.stars.value = PLANET === 'moon' ? 1 : 1 - Math.min(1, daylight * 1.6);
   u.glow.value = n.glow + (d.glow - n.glow) * daylight;
   u.core.value = n.core + (d.core - n.core) * daylight;
   u.discA.value = n.discA + (d.discA - n.discA) * daylight;
   u.discB.value = n.discB + (d.discB - n.discB) * daylight;
   u.disc.value = n.disc + (d.disc - n.disc) * daylight;
+  if (planet) {
+    u.planetDir.value.copy(planet.dir);
+    u.planetTangent.value.copy(planet.tangent);
+    u.planetBitangent.value.copy(planet.bitangent);
+    u.planetR.value = 0.998; // ~3.6° across — still bigger than a realistic disc, but the
+    // first pass (~11°) filled a third of the screen and looked like a mistake, not a moon.
+    u.planetGlow.value = 0.04; // almost no atmosphere to haze its edge — should read crisp, not glowing
+  } else {
+    u.planetR.value = 0;
+    u.planetGlow.value = 0;
+  }
+}
+
+// Верданта's companion world: fixed in the dome, not drifting — a moon that visibly
+// crawled across the sky on its own (the first version of this did) reads as broken,
+// not "always there". It still turns with you as you turn, exactly like the stars.
+// Kept fairly low (not overhead) on purpose: the chase camera looks mostly forward
+// with only a slight upward allowance, so a moon parked near the zenith would sit
+// outside the player's normal view almost all the time — exactly the "where did it
+// go" problem this is meant to fix.
+const _pDir = new THREE.Vector3(-0.38, 0.16, 0.91).normalize();
+const _pTan = new THREE.Vector3();
+const _pBit = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
+_pTan.crossVectors(_worldUp, _pDir).normalize();
+_pBit.crossVectors(_pDir, _pTan).normalize();
+const _planet = { dir: _pDir, tangent: _pTan, bitangent: _pBit };
+export function planetOrbit() {
+  return _planet;
 }
 
 // The sky shader prints its colours as-is, but three converts the fog colour from
@@ -131,6 +274,6 @@ export function updateSky(material, sunDir, daylight) {
 // exactly the horizon colour and distant terrain melts into the sky.
 const _mix = new THREE.Color();
 export function horizonColor(daylight, out) {
-  _mix.copy(PRESETS.night.horizon).lerp(_c.copy(PRESETS.day.horizon), daylight);
+  _mix.copy(PRESETS.night.horizon).lerp(_c.copy(DAY.horizon), daylight);
   return out.setRGB(_mix.r, _mix.g, _mix.b, THREE.SRGBColorSpace);
 }

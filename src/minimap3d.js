@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { terrainHeight, ROUTE_PTS, ROUTE_BOUNDS, BASES } from './terrain.js';
+import { PLANET } from './planet.js';
 
 // A small, real 3D relief of the whole crossing, built once from the same height
 // field the ground itself uses. Parked in the corner it just turns slowly on its
@@ -9,12 +10,25 @@ import { terrainHeight, ROUTE_PTS, ROUTE_BOUNDS, BASES } from './terrain.js';
 // waypoint there. Lit by a fixed lamp rather than the sol cycle, so it reads the
 // same whether it's day or night outside.
 
-const ELEV_STOPS = [
-  [0.0, new THREE.Color(0x7c4228)],
-  [0.35, new THREE.Color(0xa15c34)],
-  [0.68, new THREE.Color(0xc99459)],
-  [1.0, new THREE.Color(0xecd4a8)],
-];
+// The relief mesh only reads terrainHeight, which already differs per planet, but
+// every colour here was hand-picked for Mars, so a moonscape or Верданта still
+// rendered like a scoop of red dust otherwise. One look per planet, Mars untouched.
+const LOOK_BY_PLANET = {
+  mars: {
+    elev: [[0.0, 0x7c4228], [0.35, 0xa15c34], [0.68, 0xc99459], [1.0, 0xecd4a8]],
+    bg: 0x120a06, road: 0xe8aa74, sun: 0xfff3e0, ambient: 0x9a7a5c,
+  },
+  moon: {
+    elev: [[0.0, 0x2c2c2e], [0.35, 0x48484a], [0.68, 0x76767a], [1.0, 0xb2b2ae]],
+    bg: 0x030303, road: 0x9a9a96, sun: 0xf2f2f6, ambient: 0x5c5c60,
+  },
+  verdanta: {
+    elev: [[0.0, 0x141416], [0.35, 0x2c3a2a], [0.68, 0x4a5c3f], [1.0, 0x8c9a90]],
+    bg: 0x0a1210, road: 0x6a6a5e, sun: 0xeef2f0, ambient: 0x546a52,
+  },
+};
+const LOOK = LOOK_BY_PLANET[PLANET] || LOOK_BY_PLANET.mars;
+const ELEV_STOPS = LOOK.elev.map(([t, c]) => [t, new THREE.Color(c)]);
 function elevColor(hi, out) {
   let i = 0;
   while (i < ELEV_STOPS.length - 2 && hi > ELEV_STOPS[i + 1][0]) i++;
@@ -58,7 +72,7 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   const markerUnit = orbitDist * 0.07;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x120a06);
+  scene.background = new THREE.Color(LOOK.bg);
 
   // The relief mesh: one static grid over the whole crossing, roughly 45 m a cell —
   // coarser than the driving terrain, which is fine for an overview you can orbit.
@@ -99,7 +113,7 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   );
   const curve = new THREE.CatmullRomCurve3(roadPts);
   const roadGeo = new THREE.TubeGeometry(curve, 240, 3.4, 5, false);
-  scene.add(new THREE.Mesh(roadGeo, new THREE.MeshBasicMaterial({ color: 0xe8aa74 })));
+  scene.add(new THREE.Mesh(roadGeo, new THREE.MeshBasicMaterial({ color: LOOK.road })));
 
   for (const b of BASES) {
     const m = new THREE.Mesh(
@@ -113,7 +127,8 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
 
   // Mission modules: shown from the very start (no proximity reveal) so the player
   // can plan their own route; each hides once picked up, same as its in-world crate.
-  const moduleMarkers = missionModules.map((m) => {
+  // Гермес-3 is a Mars-only story, so no markers on the other, empty test worlds.
+  const moduleMarkers = (PLANET === 'mars' ? missionModules : []).map((m) => {
     const mesh = new THREE.Mesh(
       new THREE.OctahedronGeometry(markerUnit * 0.28),
       new THREE.MeshBasicMaterial({ color: m.color })
@@ -130,9 +145,9 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   roverMarker.position.y = markerUnit * 0.2;
   scene.add(roverMarker);
 
-  const sun = new THREE.DirectionalLight(0xfff3e0, 2.0);
+  const sun = new THREE.DirectionalLight(LOOK.sun, 2.0);
   sun.position.set(-420, 720, 260);
-  scene.add(sun, new THREE.AmbientLight(0x9a7a5c, 1.4));
+  scene.add(sun, new THREE.AmbientLight(LOOK.ambient, 1.4));
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 20, 12000);
   camera.position.set(

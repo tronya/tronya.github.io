@@ -1,18 +1,21 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildVehicle, WHEEL_R, SUSP } from './vehicle.js';
-import { VehicleSim } from './physics.js';
+import { VehicleSim, PLANET } from './physics.js';
 import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
+import { createGrass } from './grass.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
+import { createDebris } from './debris.js';
+import { createUpgrades, BRANCHES as UPGRADE_BRANCHES } from './upgrades.js';
 import { createDustTrail } from './dust.js';
 import { createSonar, MAX_BIAS as SONAR_MAX_BIAS } from './sonar.js';
 import { createMinimap3D } from './minimap3d.js';
-import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
+import { createSkyMaterial, updateSky, horizonColor, planetOrbit } from './sky.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
 // Fog only far from the rover. Exponential fog was fully opaque by ~500 m, which
@@ -87,12 +90,35 @@ sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 0.35);
 scene.add(hemi);
+// Верданта's companion world (see planetOrbit in sky.js) doubles as a faint night
+// light — real moonlight is dim and shadowless, so no shadow map for this one.
+// Intensity stays 0 on every other planet (set below in applyTimeOfDay).
+const planetLight = new THREE.DirectionalLight(0xcdd6ff, 0);
+scene.add(planetLight, planetLight.target);
 
 // Day and night are the two ends of a continuous cycle, blended by sun height.
-const LOOKS = {
-  day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, exposure: 1.0, dust: 0x9d6d44 },
-  night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, exposure: 1.2, dust: 0x5a3d2b },
+// On the Moon there's no air to bounce any light into `hemi`/`env` at all — direct
+// sunlight (the `sun` light below) does almost all the work, day or night, so both
+// ends of the Moon's cycle sit close together, near-black and neutral grey.
+const LOOKS_BY_PLANET = {
+  moon: {
+    day: { light: 0xfff6ea, intensity: 3.1, sky: 0x0a0a0c, ground: 0x050505, hemi: 0.05, env: 0.04, exposure: 1.0, dust: 0x5c5c5e },
+    night: { light: 0x9db4ff, intensity: 0.15, sky: 0x030304, ground: 0x000000, hemi: 0.03, env: 0.02, exposure: 1.05, dust: 0x3a3a3c },
+  },
+  // A real, thick atmosphere: the overcast sky itself is a strong, soft, all-over
+  // light source (that's what `hemi`/`env` are standing in for here), so ambient
+  // stays high even though the sun disc is muted — cloudy daylight is bright, just
+  // shadowless, and it barely dims at all after dark under the same cloud deck.
+  verdanta: {
+    day: { light: 0xeef2f0, intensity: 1.6, sky: 0xb9c4c2, ground: 0x384a38, hemi: 0.55, env: 0.5, exposure: 1.0, dust: 0x4a4a44 },
+    night: { light: 0x8fa8c0, intensity: 0.5, sky: 0x232a2c, ground: 0x0c120e, hemi: 0.3, env: 0.15, exposure: 1.1, dust: 0x2c2c2a },
+  },
+  mars: {
+    day: { light: 0xfff0dd, intensity: 2.8, sky: 0xf1c9a0, ground: 0x8a4a32, hemi: 0.35, env: 0.7, exposure: 1.0, dust: 0x9d6d44 },
+    night: { light: 0x9db4ff, intensity: 0.7, sky: 0x22305a, ground: 0x0a0806, hemi: 0.45, env: 0.2, exposure: 1.2, dust: 0x5a3d2b },
+  },
 };
+const LOOKS = LOOKS_BY_PLANET[PLANET] || LOOKS_BY_PLANET.mars;
 const sunDir = new THREE.Vector3(0, 1, 0);
 const look = { ...LOOKS.night };
 const mixC = new THREE.Color();
@@ -132,8 +158,21 @@ function applyTimeOfDay(timeOfDay) {
   look.env = lerp(n.env, d.env);
   look.exposure = lerp(n.exposure, d.exposure);
 
-  updateSky(sky.material, sunDir, k);
+  const orbit = PLANET === 'verdanta' ? planetOrbit() : null;
+  updateSky(sky.material, sunDir, k, orbit);
   horizonColor(k, scene.fog.color);
+  if (orbit) {
+    planetLight.position.copy(sim.pos).addScaledVector(orbit.dir, 80);
+    planetLight.target.position.copy(sim.pos);
+    // Fades in well after sunset, and ramps up fast once it actually clears the
+    // horizon rather than needing to climb high overhead first — real moonlight is
+    // faint everywhere it reaches, not just at its zenith.
+    const nightK = 1 - k;
+    const horizonK = clamp(orbit.dir.y / 0.2, 0, 1);
+    planetLight.intensity = nightK * nightK * 0.4 * horizonK;
+  } else {
+    planetLight.intensity = 0;
+  }
   renderer.toneMappingExposure = look.exposure;
   sun.color.copy(cA.setHex(n.light)).lerp(cB.setHex(d.light), k);
   sun.intensity = look.intensity;
@@ -148,7 +187,7 @@ function applyTimeOfDay(timeOfDay) {
   // The environment probe is costly; refresh it only when the light really moved.
   if (Math.abs(k - envAt) > 0.06) {
     envAt = k;
-    updateSky(envSky.material, sunDir, k);
+    updateSky(envSky.material, sunDir, k, orbit);
     if (envTarget) envTarget.dispose();
     envTarget = pmrem.fromScene(envScene, 0.02);
     scene.environment = envTarget.texture;
@@ -169,13 +208,23 @@ for (const b of BASES) {
 
 const tracks = createTracks();
 const drawSize = new THREE.Vector2();
-const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 } };
+const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 }, tail: { on: false, x: 0, y: 0, z: 0 } };
 const roadPosts = createRoadPosts();
-scene.add(roadPosts.group);
 const missions = createMissions();
-scene.add(missions.group);
+const debris = createDebris();
+// The Moon is an empty test world for now — physics/terrain only, none of the
+// Гермес-3 story dressing (still built above so the rest of the code has real
+// objects to reference, just never added to the scene or advanced per frame).
+if (PLANET === 'mars') {
+  scene.add(roadPosts.group);
+  scene.add(missions.group);
+  scene.add(debris.group);
+}
+const upgrades = createUpgrades(debris, missions);
 const sand = createSand();
 scene.add(sand.points);
+const grass = createGrass(); // no-op off Верданта
+scene.add(grass.group);
 scene.add(tracks.mesh);
 
 const sim = new VehicleSim();
@@ -205,7 +254,7 @@ const dustTex = makeDustTexture();
 const dust = createDustTrail();
 scene.add(dust.group);
 const sonar = createSonar(vehicle.root);
-scene.add(sonar.group);
+scene.add(sonar.group); // the ping markers — visible whenever upgrades.unlocked('sonar') is
 let sonarScan = { warnObstacle: null, avoidBias: 0 };
 let sonarWarned = false;
 
@@ -347,7 +396,7 @@ function lampLevel() {
 }
 
 const HEAD_INTENSITY = 2200;
-const FAR_INTENSITY = 125000; // scaled with range^2 (decay=2) to stay as bright at the new 800 m cutoff
+const FAR_INTENSITY = 125000; // scaled with range^2 (decay=2) for the 800 m cutoff below
 function setLamps(level) {
   const marks = level >= 1;
   const heads = level >= 2;
@@ -365,8 +414,11 @@ function setLamps(level) {
   }
   cabLight.visible = heads;
   cabLight.intensity = heads ? 25 : 0;
-  farLight.visible = heads;
-  farLight.intensity = heads ? FAR_INTENSITY : 0;
+  // The long-range roof beam is a workshop unlock — no lamp mode lights it up until
+  // ДАЛЬНЄ СВІТЛО is bought, whatever else is on.
+  const far = heads && upgrades.unlocked('farlight');
+  farLight.visible = far;
+  farLight.intensity = far ? FAR_INTENSITY : 0;
 }
 
 // ---------- audio ----------
@@ -424,6 +476,19 @@ for (const tab of document.querySelectorAll('#menu .tab')) {
 document.getElementById('mapToggle').addEventListener('click', toggleMap);
 document.getElementById('sandToggle').addEventListener('click', toggleSand);
 
+// ---------- planet select (reloads — see physics.js's PLANET/GRAVITY) ----------
+const PLANET_SUBTITLE = { moon: 'Місяць · порожній тестовий світ', verdanta: 'Верданта · вигадана планета, тестовий світ' };
+if (PLANET_SUBTITLE[PLANET]) document.getElementById('titleSub').textContent = PLANET_SUBTITLE[PLANET];
+for (const p of ['mars', 'moon', 'verdanta']) {
+  const btn = document.getElementById(`planet-${p}`);
+  btn.classList.toggle('on', p === PLANET);
+  btn.addEventListener('click', () => {
+    if (p === PLANET) return;
+    try { localStorage.setItem('rover.planet', p); } catch (e) { /* storage may be blocked */ }
+    location.reload();
+  });
+}
+
 // ---------- graphics settings ----------
 document.getElementById('viewDist').addEventListener('input', (e) => {
   const k = e.target.value / 100;
@@ -478,7 +543,54 @@ try { odo.total = Number(localStorage.getItem('rover.odo')) || 0; } catch (e) { 
 const hudOdoTrip = document.getElementById('odoTrip');
 const hudOdoTotal = document.getElementById('odoTotal');
 const hudMissions = document.getElementById('missionStat');
+const hudDebris = document.getElementById('debrisStat');
 const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
+
+// ---------- workshop panel (shows up on its own near БЕТА) ----------
+const wsPanel = document.getElementById('workshop');
+const wsCurrency = document.getElementById('wsCurrency');
+const wsRows = document.getElementById('wsRows');
+const wsButtons = {};
+for (const b of UPGRADE_BRANCHES) {
+  const row = document.createElement('div');
+  row.className = 'wsRow';
+  const name = document.createElement('span');
+  name.className = 'wsName';
+  name.innerHTML = `${b.icon} ${b.label}<i>${b.hint}</i>`;
+  const lvl = document.createElement('b');
+  lvl.className = 'wsLevel';
+  const btn = document.createElement('button');
+  btn.addEventListener('click', () => {
+    if (upgrades.buy(b.id)) {
+      if (audio) audio.beep(1040, 0.1);
+      refreshWorkshop();
+    }
+  });
+  row.append(name, lvl, btn);
+  wsRows.appendChild(row);
+  wsButtons[b.id] = { btn, lvl };
+}
+function refreshWorkshop() {
+  wsCurrency.textContent = `мотлох: ${upgrades.currency()}`;
+  for (const b of UPGRADE_BRANCHES) {
+    const { btn, lvl } = wsButtons[b.id];
+    const level = upgrades.level(b.id);
+    lvl.textContent = b.fmt ? b.fmt(b.vals[level]) : level ? 'є' : 'нема';
+    const cost = upgrades.nextCost(b.id);
+    const locked = b.requires && !upgrades.unlocked(b.requires);
+    if (cost === null) {
+      btn.textContent = 'Максимум';
+      btn.disabled = true;
+      btn.classList.add('maxed');
+    } else {
+      btn.textContent = locked ? `Спершу ${BRANCH_BY_ID[b.requires].label}` : `Купити за ${cost}`;
+      btn.disabled = locked || !upgrades.canBuy(b.id);
+      btn.classList.remove('maxed');
+    }
+  }
+}
+const BRANCH_BY_ID = Object.fromEntries(UPGRADE_BRANCHES.map((b) => [b.id, b]));
+refreshWorkshop();
 document.getElementById('odoRow').addEventListener('click', () => { odo.trip = 0; });
 function stepOdometer(t) {
   if (odo.last) {
@@ -537,6 +649,10 @@ const btnReset = document.getElementById('reset');
 const auto = { state: 'drive' };
 
 function setAutopilot(on) {
+  if (on && !upgrades.unlocked('autopilot')) {
+    flash('Автопілот заблокований — купи в майстерні БЕТА');
+    return;
+  }
   autopilot = on;
   if (!on) auto.state = 'drive';
   hudMode.textContent = on ? 'АВТОПІЛОТ' : 'РУЧНЕ КЕРУВАННЯ';
@@ -783,11 +899,15 @@ function autopilotInput() {
   if (!route.length) return { throttle: 0, steer: 0, brake: 1, boost: false };
 
   const tgt = route[0];
-  const want = Math.atan2(tgt.x - sim.pos.x, tgt.z - sim.pos.z) + sonarScan.avoidBias;
+  // АВТОУНИКНЕННЯ is its own workshop unlock, separate from the sonar that spots
+  // the obstacle in the first place — without it the autopilot still gets warned
+  // (the flash/beep above) but doesn't actually swerve for it.
+  const bias = upgrades.unlocked('avoidance') ? sonarScan.avoidBias : 0;
+  const want = Math.atan2(tgt.x - sim.pos.x, tgt.z - sim.pos.z) + bias;
   // A rock dead ahead with no clear side (avoidBias pinned near its max both ways
   // cancel toward the corridor centre, but the beam still reports it as crowded):
   // ease off rather than forcing the turn through it.
-  const dodgeLoad = Math.abs(sonarScan.avoidBias) / SONAR_MAX_BIAS;
+  const dodgeLoad = Math.abs(bias) / SONAR_MAX_BIAS;
   // A hard swerve at full speed is how it nearly tipped over — bleed off real speed
   // (not just throttle) once the dodge gets serious, so the turn happens slower.
   return {
@@ -880,12 +1000,19 @@ function frame() {
 
   // Scanned from last frame's position — one frame of lag, not worth chasing — so
   // autopilotInput() (called inside readInput below) already sees this tick's bias.
-  sonarScan = sonar.update(dt, sim.pos.x, sim.pos.z, sim.yaw());
-  if (sonarScan.warnObstacle && !sonarWarned) {
-    sonarWarned = true;
-    flash(`Сонар: перешкода за ${Math.round(sonarScan.warnObstacle.d)} м`);
-    if (audio) audio.beep(620);
-  } else if (!sonarScan.warnObstacle) {
+  // The sonar itself is a workshop unlock — no scan, no pings until bought (upgrades
+  // is planet-aware: always off on the Moon, always on on Верданта, see upgrades.js).
+  if (upgrades.unlocked('sonar')) {
+    sonarScan = sonar.update(dt, sim.pos.x, sim.pos.z, sim.yaw());
+    if (sonarScan.warnObstacle && !sonarWarned) {
+      sonarWarned = true;
+      flash(`Сонар: перешкода за ${Math.round(sonarScan.warnObstacle.d)} м`);
+      if (audio) audio.beep(620);
+    } else if (!sonarScan.warnObstacle) {
+      sonarWarned = false;
+    }
+  } else {
+    sonarScan = { warnObstacle: null, avoidBias: 0 };
     sonarWarned = false;
   }
 
@@ -950,6 +1077,13 @@ function frame() {
 
   flippedFor = sim.upY < 0.55 && speedAbs < 2.5 && righting.t <= 0 ? flippedFor + dt : 0;
   hudHint.classList.toggle('show', flippedFor > 1.0);
+  // ---------- workshop upgrades ----------
+  sim.powerMul = upgrades.mul('motor');
+  sim.suspMul = upgrades.mul('suspension');
+  sim.gripMul = upgrades.mul('wheels');
+  const chargeMul = upgrades.mul('panels');
+  const drawMul = upgrades.mul('battery');
+
   // ---------- sol cycle and power ----------
   if (dynamicLight) {
     timeOfDay = (timeOfDay + dt / SOL_SECONDS) % 1;
@@ -965,10 +1099,10 @@ function frame() {
   vehicle.setPanels(power.panels);
 
   // Charging needs the wings fully open and the sun above the horizon.
-  power.charge = power.panels > 0.99 ? CHARGE_PEAK * Math.max(0, sunDir.y) : 0;
+  power.charge = power.panels > 0.99 ? CHARGE_PEAK * chargeMul * Math.max(0, sunDir.y) : 0;
   // Rear-only drive spins up half the drivetrain, so it costs less to hold the same
   // throttle — the payoff for giving up front-axle traction above AWD_UP.
-  power.draw = DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8);
+  power.draw = (DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8)) * drawMul;
   const wasEmpty = power.battery <= 0;
   power.battery = clamp(power.battery + (power.charge - power.draw) * dt, 0, BATTERY_MAX);
   if (!wasEmpty && power.battery <= 0) {
@@ -1038,7 +1172,7 @@ function frame() {
   for (const l of tailLights) l.intensity = lampsLit ? 14 + 56 * braking : 0;
   for (const l of markerLights) l.intensity = lampsLit ? 14 : 0;
 
-  tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact })));
+  if (PLANET === 'mars') tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact })));
 
   // Loose sand: scattered by the wheels, lit by the sun or, at night, by the headlights.
   const yawNow = sim.yaw();
@@ -1058,16 +1192,37 @@ function frame() {
   sandCtx.head.z = sim.pos.z + fz * 3.6;
   sandCtx.head.dx = fx;
   sandCtx.head.dz = fz;
+  // Tail lamps: on with any lamp mode (not just full headlights), aimed backwards
+  // right along the dust trail — see dust.js's night-brightness trick.
+  sandCtx.tail.on = lampLevel() >= 1;
+  sandCtx.tail.x = sim.pos.x - fx * 3.4;
+  sandCtx.tail.y = sim.pos.y - 0.4;
+  sandCtx.tail.z = sim.pos.z - fz * 3.4;
   sand.update(dt, sandCtx);
+  grass.update(dt, sandCtx);
   dust.update(dt, sandCtx);
-  roadPosts.update(t, daylight, sandCtx.pxPerUnit, sim.pos);
 
-  const missionEvent = missions.update(t, sim.pos.x, sim.pos.z);
-  if (missionEvent) {
-    flash(missionEvent.text);
-    if (audio) { audio.beep(missionEvent.type === 'deliver' ? 1180 : 780); if (missionEvent.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
+  if (PLANET === 'mars') {
+    roadPosts.update(t, daylight, sandCtx.pxPerUnit, sim.pos);
+
+    const missionEvent = missions.update(t, sim.pos.x, sim.pos.z);
+    if (missionEvent) {
+      flash(missionEvent.text);
+      if (audio) { audio.beep(missionEvent.type === 'deliver' ? 1180 : 780); if (missionEvent.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
+    }
+    hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
+
+    const debrisEvent = debris.update(t, sim.pos.x, sim.pos.z);
+    if (debrisEvent) {
+      flash(debrisEvent.text);
+      if (audio) audio.beep(1400, 0.08);
+    }
+    hudDebris.textContent = `${debris.collectedCount()}/${debris.total}`;
+
+    const nearWs = upgrades.nearWorkshop(sim.pos.x, sim.pos.z);
+    wsPanel.classList.toggle('show', nearWs);
+    if (nearWs) refreshWorkshop();
   }
-  hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
 
   if (audio) {
     const contacts = W.filter((w) => w.sim.contact).length / 4;
@@ -1114,6 +1269,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, missions, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, grass, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

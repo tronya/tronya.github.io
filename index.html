@@ -92,6 +92,20 @@
       color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
     #map3d.big #mapClose { display: block; }
     #hint { top: 80px; left: 50%; transform: translateX(-50%); display: none; }
+    /* Shows up on its own once the rover is parked near БЕТА — a shop, not a menu,
+       so it opens by proximity rather than a button. */
+    #workshop { top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; width: 360px; }
+    #workshop.show { display: block; }
+    .wsHead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .wsHead b { font-size: 14px; letter-spacing: 0.1em; }
+    .wsRow { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 9px; font-size: 11px; }
+    .wsRow .wsName { opacity: 0.9; }
+    .wsRow .wsName i { display: block; font-style: normal; opacity: 0.6; font-size: 10px; }
+    .wsRow .wsLevel { opacity: 0.75; white-space: nowrap; }
+    .wsRow button { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 210, 170, 0.3); color: inherit;
+      font: inherit; font-size: 11px; padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+    .wsRow button:disabled { opacity: 0.35; cursor: default; }
+    .wsRow button.maxed { opacity: 0.55; cursor: default; }
     /* Frame time is the closest an ordinary web page gets to a CPU-load reading —
        browsers don't expose real OS CPU percentage — but a rising number here means
        the same thing: something is taking longer to compute or draw each frame. */
@@ -115,7 +129,7 @@
 <body>
   <div id="loading">ЗАВАНТАЖЕННЯ…</div>
   <div id="leftCol">
-    <div id="title" class="panel"><b>SOLAR ROVER</b><span>перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.75 · автопілот тримає ~45 км/год</span></div>
+    <div id="title" class="panel"><b>SOLAR ROVER</b><span id="titleSub">перехід АЛЬФА → БЕТА · ~10 км</span><span id="version">v0.91 · планета-супутник менша в 3 рази, темна сторона майже чорна</span></div>
     <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span></div>
   </div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="56"></canvas></div>
@@ -136,12 +150,18 @@
     <div class="gauge"><i id="batteryBar"></i></div>
     <div class="row"><span id="panelState">КРИЛА: СКЛАДЕНІ</span><b id="powerFlow">0.00 %/с</b></div>
     <div class="row"><span>МОДУЛІ ГЕРМЕС-3</span><b id="missionStat">везеш 0 · здано 0/4</b></div>
+    <div class="row"><span>МОТЛОХ</span><b id="debrisStat">0/28</b></div>
     <div class="row" id="odoRow" title="Клац — обнулити поїздку"><span>ПОЇЗДКА</span><b id="odoTrip">0 м</b></div>
     <div class="row sol"><span>ПРОБІГ ВСЬОГО</span><b id="odoTotal">0 м</b></div>
     <div class="row sol"><span>СОЛ</span><b id="clock">00:00</b></div>
   </div>
   <div id="warn" class="panel"></div>
   <div id="hint" class="panel">Перевернулись? Натисни <kbd>R</kbd>, щоб поставити на колеса</div>
+
+  <div id="workshop" class="panel">
+    <div class="wsHead"><b>МАЙСТЕРНЯ БЕТА</b><span id="wsCurrency">мотлох: 0</span></div>
+    <div id="wsRows"></div>
+  </div>
 
   <div id="menu" class="panel">
     <div class="menuHead">
@@ -166,6 +186,12 @@
         <button id="lamps">Світло: АВТО</button>
         <button id="mapToggle">Карта: увімк</button>
         <button id="sandToggle" class="on">Камінці: увімк</button>
+      </div>
+      <div class="secTitle">Планета (перезавантажить сторінку)</div>
+      <div class="btnRow" id="planetRow">
+        <button id="planet-mars" class="on">Марс</button>
+        <button id="planet-moon">Місяць (тест, порожній)</button>
+        <button id="planet-verdanta">Верданта (тест, порожня)</button>
       </div>
     </div>
 

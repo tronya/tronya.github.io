@@ -22,6 +22,14 @@ import { pebbleDensity, terrainHeight, groundColorAtXZ } from './terrain.js';
 const GRAVITY = 3.71; // Mars
 const POOL = 510;
 const WIND = new THREE.Vector3(0.5, 0, 0.2);
+// Sprites ignore scene lighting entirely (no normals) — left alone they render at
+// full painted brightness even in pitch dark, which is exactly what made the trail
+// read as a glowing cloud at night instead of the near-black haze it should be. So
+// night brightness is faked by hand: a dark ambient floor everywhere, restored to
+// full only where an actual light reaches — here, the tail lamps, which is what's
+// actually behind the rover pointed straight down this trail.
+const NIGHT_FLOOR = 0.1;
+const TAIL_LIT_R = 13; // roughly the tail SpotLight's own range plus its falloff
 
 function makeDustTexture() {
   const c = document.createElement('canvas');
@@ -82,11 +90,14 @@ export function createDustTrail() {
     p.sprite.visible = true;
   }
 
-  // ctx: same shape main.js already builds for sand.js — x/z/yaw/vx/vz/wheels/daylight.
+  // ctx: same shape main.js already builds for sand.js — x/z/yaw/vx/vz/wheels/
+  // daylight/tail (tail-lamp position, for the night-brightness trick below).
   function update(dt, ctx) {
     time += dt;
     const gust = 1 + 0.5 * Math.sin(time * 0.11);
     const speed = Math.hypot(ctx.vx, ctx.vz);
+    // Same darkening for every particle this frame bar the tail-lit ones below.
+    const nightFloor = 1 - (1 - ctx.daylight) * (1 - NIGHT_FLOOR);
 
     ctx.wheels.forEach((w, i) => {
       if (!w.contact) return;
@@ -157,7 +168,16 @@ export function createDustTrail() {
       const grow = Math.min(1, k * 1.1);
       const fade = k < 0.18 ? k / 0.18 : 1 - (k - 0.18) / 0.82;
       p.sprite.scale.setScalar(p.base * (0.45 + grow * 4.3));
-      p.sprite.material.opacity = p.punch * Math.max(0, fade) * (1 - grow * 0.55);
+
+      let bright = nightFloor;
+      if (bright < 1 && ctx.tail && ctx.tail.on) {
+        const dx = p.sprite.position.x - ctx.tail.x;
+        const dy = p.sprite.position.y - ctx.tail.y;
+        const dz = p.sprite.position.z - ctx.tail.z;
+        const glow = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / TAIL_LIT_R);
+        bright = Math.max(bright, glow);
+      }
+      p.sprite.material.opacity = p.punch * Math.max(0, fade) * (1 - grow * 0.55) * bright;
     }
   }
 

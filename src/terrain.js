@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLANET } from './planet.js';
 
 // A ~10 km crossing between two bases. The world is far too large for one mesh, so
 // the ground is analytic (terrainHeight) and the visuals are streamed as tiles that
@@ -209,30 +210,52 @@ function baseFlatten(x, z) {
 }
 
 // Craters lie beside the road, never on it, and get more frequent the farther you go.
-const CRATERS = (() => {
+// Parametrized so the Moon can reuse it for a much denser, closer-in field instead
+// of a second copy of the same loop — `seed` keeps the two planets' crater sets from
+// landing on exactly the same spots along the route.
+function buildCraters(count, seed, { pad, sizeMin, sizeMax, spread }) {
   const list = [];
   const n = ROUTE_PTS.length;
-  for (let i = 0; i < 150; i++) {
-    const r1 = hash(i * 3 + 1, 7);
-    const r2 = hash(i * 5 + 2, 13);
-    const r3 = hash(i * 7 + 3, 29);
-    const r4 = hash(i * 11 + 5, 41);
+  for (let i = 0; i < count; i++) {
+    const r1 = hash(i * 3 + 1 + seed, 7);
+    const r2 = hash(i * 5 + 2 + seed, 13);
+    const r3 = hash(i * 7 + 3 + seed, 29);
+    const r4 = hash(i * 11 + 5 + seed, 41);
     const k = 1 + Math.floor(r1 * (n - 3));
     const a = ROUTE_PTS[k - 1];
     const b = ROUTE_PTS[k + 1];
     const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
     const nx = -(b.z - a.z) / len;
     const nz = (b.x - a.x) / len;
-    const R = 14 + r3 * 34;
-    const off = (r2 < 0.5 ? -1 : 1) * (ROAD_HALF + R + 30 + r4 * 900);
+    const R = sizeMin + r3 * (sizeMax - sizeMin);
+    const off = (r2 < 0.5 ? -1 : 1) * (pad + R + r4 * spread);
     const x = ROUTE_PTS[k].x + nx * off;
     const z = ROUTE_PTS[k].z + nz * off;
-    if (roadDist(x, z) < ROAD_HALF + R + 20) continue;
+    if (roadDist(x, z) < pad + R) continue;
     if (BASES.some((bs) => Math.hypot(x - bs.x, z - bs.z) < BASE_FLAT_R + R + 40)) continue;
     list.push({ x, z, R });
   }
   return list;
-})();
+}
+
+const CRATERS = PLANET === 'moon'
+  // No atmosphere to weather them away — heavily, uniformly cratered right up
+  // close to the path, at every size from potholes to real bowls.
+  ? buildCraters(950, 1000, { pad: ROAD_HALF - 6, sizeMin: 5, sizeMax: 70, spread: 1500 })
+  : PLANET === 'verdanta'
+  // A living world weathers its impact scars away — none left to speak of.
+  ? []
+  : buildCraters(150, 0, { pad: ROAD_HALF + 30, sizeMin: 14, sizeMax: 48, spread: 900 });
+
+// A winding river, independent of the road: not a built polyline but the zero
+// contour of a slow noise field, which is naturally sinuous for free — no path-
+// finding or distance search needed, just evaluate it at (x, z) like every other
+// height/colour term here. Only Верданта has one.
+function riverAmount(x, z) {
+  if (PLANET !== 'verdanta') return 0;
+  const n = fbm(x * 0.0011 + 500, z * 0.0011 - 300, 3) - 0.5;
+  return 1 - smooth(0, 0.035, Math.abs(n));
+}
 
 // Bucket the craters by x so a lookup touches only a few.
 const CRATER_BIN = 400;
@@ -286,9 +309,71 @@ function mesaHeight(wx, wz) {
   return k1 * 84 + k1 * k2 * 50;
 }
 
+// No atmosphere, no volcanism, no dunes — just rolling regolith and craters,
+// everywhere, right up to the path. None of Mars's mesas/dune fields/mountain
+// ranges; the crater field itself (see CRATERS above) does almost all the work.
+function moonHeight(x, z) {
+  const rd = roadDist(x, z);
+  const rough = smooth(ROAD_HALF + 6, ROAD_HALF + 90, rd);
+  let h = (fbm(x * 0.006 + 5, z * 0.006 + 9, 3) - 0.46) * 5 * (0.3 + 2.0 * rough);
+  h += (fbm(x * 0.03 + 60, z * 0.03 - 18, 2) - 0.46) * 1.6 * (0.3 + 2.4 * rough);
+  h += craterHeight(x, z);
+
+  const wall = wallAmount(x, z);
+  if (wall > 0) h += wall * (30 + 50 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
+
+  const flat = baseFlatten(x, z);
+  const mid = (fbm(x * 0.06, z * 0.06, 3) - 0.44) * 0.7 * (0.5 + 1.0 * rough);
+  const bumpy = (fbm(x * 0.18 + 9, z * 0.18 + 4, 2) - 0.44) * 0.22 * (0.5 + 2.0 * rough);
+  const small = (vnoise(x * 0.35, z * 0.35) - 0.5) * 0.1;
+  return (h + mid + bumpy + small) * flat;
+}
+
+// Верданта: a living world, roughly human gravity — mountains and a winding river,
+// no craters, no dunes. Reuses Mars's own mesa/mountain-range shapes (they're just
+// good basalt-peak shapes) rather than inventing a third mountain formula, recoloured
+// black-and-moss instead of red by verdantaColorAt below.
+function verdantaHeight(x, z) {
+  const rd = roadDist(x, z);
+  const rough = smooth(ROAD_HALF + 14, ROAD_HALF + 170, rd);
+  const away = smooth(60, 340, rd);
+  const wx = x + (fbm(x * 0.02 + 11, z * 0.02 + 3, 2) - 0.5) * 26;
+  const wz = z + (fbm(x * 0.02 - 7, z * 0.02 + 29, 2) - 0.5) * 26;
+
+  const mesa = away > 0 ? mesaHeight(wx, wz) : 0;
+  const flatTop = 1 - 0.75 * MESA.onTop * away;
+
+  let h = (fbm(wx * 0.009 + 5, wz * 0.009 + 9, 3) - 0.46) * 7 * (0.3 + 2.2 * rough) * flatTop;
+  h += (fbm(wx * 0.026 + 60, wz * 0.026 - 18, 2) - 0.46) * 2 * (0.3 + 2.6 * rough) * flatTop;
+
+  if (away > 0) {
+    h += away * mesa;
+    const range = smooth(0.4, 0.64, fbm(wx * 0.00085 + 120, wz * 0.00085 - 60, 4));
+    if (range > 0) {
+      const ridge = 1 - Math.abs(fbm(wx * 0.0013 + 7, wz * 0.0013 + 81, 3) * 2 - 1);
+      h += away * range * (55 + 120 * ridge * ridge + 35 * fbm(wx * 0.005 + 3, wz * 0.005 + 44, 3));
+    }
+  }
+
+  // The river carves its own shallow valley so it actually sits low instead of
+  // just being painted onto flat ground (see verdantaColorAt for the water/moss).
+  h -= riverAmount(x, z) * 7;
+
+  const wall = wallAmount(x, z);
+  if (wall > 0) h += wall * (32 + 58 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
+
+  const flat = baseFlatten(x, z);
+  const mid = (fbm(x * 0.06, z * 0.06, 3) - 0.44) * 0.85 * (0.5 + 1.2 * rough);
+  const bumpy = (fbm(x * 0.18 + 9, z * 0.18 + 4, 2) - 0.44) * 0.28 * (0.5 + 2.2 * rough);
+  const small = (vnoise(x * 0.35, z * 0.35) - 0.5) * 0.11;
+  return (h + mid + bumpy + small) * flat;
+}
+
 // A graded road across rough country: gentle along the road, hilly, cratered and
 // strewn with boulders once you leave it.
 export function terrainHeight(x, z) {
+  if (PLANET === 'moon') return moonHeight(x, z);
+  if (PLANET === 'verdanta') return verdantaHeight(x, z);
   const rd = roadDist(x, z);
   const rough = smooth(ROAD_HALF + 14, ROAD_HALF + 170, rd); // 0 on the road, 1 out in the rough
   const away = smooth(60, 340, rd);
@@ -506,14 +591,33 @@ function makeRockGeometry() {
   return geo;
 }
 
-const dark = new THREE.Color(0x8a452b);
-const base = new THREE.Color(0xb4633c);
-const dust = new THREE.Color(0xd09462);
-const rockCol = new THREE.Color(0x5b3326);
-const strata = new THREE.Color(0xb46f45);
-const pale = new THREE.Color(0xd9b189);
-const rust = new THREE.Color(0x7d3a22);
-const roadCol = new THREE.Color(0xcf9666);
+const MARS_PALETTE = {
+  dark: 0x8a452b, base: 0xb4633c, dust: 0xd09462, rockCol: 0x5b3326,
+  strata: 0xb46f45, pale: 0xd9b189, rust: 0x7d3a22, roadCol: 0xcf9666,
+};
+// No iron oxide, no dust storms to sort it by grain size — just grey regolith, a bit
+// darker in the low "seas", a bit paler where a young crater threw up fresh material.
+const MOON_PALETTE = {
+  dark: 0x3a3a3d, base: 0x69696c, dust: 0x8c8c88, rockCol: 0x2c2c2e,
+  strata: 0x77726c, pale: 0xaaa8a2, rust: 0x55524e, roadCol: 0x8d8d8a,
+};
+// Black basalt instead of red iron oxide — moss and the river water get painted on
+// top in verdantaColorAt below, this is just the bare rock underneath.
+const VERDANTA_PALETTE = {
+  dark: 0x1c1c1e, base: 0x333335, dust: 0x47474a, rockCol: 0x141416,
+  strata: 0x3a4a3a, pale: 0x7c8f82, rust: 0x2f4a30, roadCol: 0x53534f,
+};
+const P = PLANET === 'moon' ? MOON_PALETTE : PLANET === 'verdanta' ? VERDANTA_PALETTE : MARS_PALETTE;
+const dark = new THREE.Color(P.dark);
+const base = new THREE.Color(P.base);
+const dust = new THREE.Color(P.dust);
+const rockCol = new THREE.Color(P.rockCol);
+const strata = new THREE.Color(P.strata);
+const pale = new THREE.Color(P.pale);
+const rust = new THREE.Color(P.rust);
+const roadCol = new THREE.Color(P.roadCol);
+const mossCol = new THREE.Color(0x5c7a3f);
+const waterCol = new THREE.Color(0x2f7d8a);
 const _c = new THREE.Color();
 
 // Heights for the tile plus a one-cell margin. computeVertexNormals() only sees the
@@ -606,6 +710,15 @@ function groundColorAt(x, z, y, normalY, out) {
     out.lerp(rockCol, steep * (0.55 + 0.45 * (1 - band)));
     out.lerp(strata, steep * band * 0.6);
   }
+  // Moss creeps up from the river on anything not too steep to hold it; the water
+  // itself is painted right over the top, at the centre of the same contour that
+  // carved its channel in verdantaHeight.
+  if (PLANET === 'verdanta') {
+    const river = riverAmount(x, z);
+    const moss = clamp(river * 2.2, 0, 1) * (1 - steep) * (0.5 + 0.5 * smooth(0.15, 0.45, m));
+    out.lerp(mossCol, moss * 0.75);
+    out.lerp(waterCol, clamp((river - 0.55) * 2.4, 0, 1));
+  }
   return out;
 }
 
@@ -618,6 +731,22 @@ export function groundColorAtXZ(x, z, out = new THREE.Color()) {
   const dz = (terrainHeight(x, z + _gcEps) - terrainHeight(x, z - _gcEps)) / (2 * _gcEps);
   const normalY = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
   return groundColorAt(x, z, y, normalY, out);
+}
+
+// How thick the moss/grass is at this spot, 0..1 — the exact same recipe
+// groundColorAt blends in as colour, exposed standalone so grass.js can place real
+// tufts where the ground already reads green, instead of duplicating the noise.
+// Always 0 off Верданта.
+export function vegetationAmount(x, z) {
+  if (PLANET !== 'verdanta') return 0;
+  const river = riverAmount(x, z);
+  if (river <= 0) return 0;
+  const m = fbm(x * 0.2, z * 0.2, 2);
+  const dx = (terrainHeight(x + _gcEps, z) - terrainHeight(x - _gcEps, z)) / (2 * _gcEps);
+  const dz = (terrainHeight(x, z + _gcEps) - terrainHeight(x, z - _gcEps)) / (2 * _gcEps);
+  const normalY = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
+  const steep = smooth(0.24, 0.58, 1 - normalY);
+  return clamp(river * 2.2, 0, 1) * (1 - steep) * (0.5 + 0.5 * smooth(0.15, 0.45, m));
 }
 
 function tileGeometry(seg) {
@@ -704,7 +833,9 @@ export function createTerrain(anisotropy = 8) {
     m4.compose(posV, q, scl);
     im.setMatrixAt(n, m4);
     const shade = 0.2 + 0.18 * hash(ci + 77, cj + 12);
-    _c.setHSL(0.045 + 0.03 * hash(ci, cj + 3), 0.38, stone.big ? shade * 0.85 : shade);
+    const sat = PLANET === 'moon' ? 0.03 : PLANET === 'verdanta' ? 0.1 : 0.38;
+    const hue = PLANET === 'verdanta' ? 0.42 : 0.045;
+    _c.setHSL(hue + 0.03 * hash(ci, cj + 3), sat, stone.big ? shade * 0.85 : shade);
     im.setColorAt(n, _c);
   }
 

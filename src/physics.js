@@ -1,12 +1,18 @@
 import * as THREE from 'three';
 import { groundHeight } from './terrain.js';
 import { WHEEL_R, WHEEL_X, AXLE_Z, SUSP, ackermann } from './vehicle.js';
+import { PLANET } from './planet.js';
 
-// Rigid-body vehicle in SI units on Mars gravity. The body has mass, inertia and a
-// high centre of mass; every wheel has a spring/damper, tyre friction limited by the
-// load on it, and the hull collides with the ground, so the truck can slide and roll over.
+export { PLANET };
 
-export const GRAVITY = 3.71;
+// Rigid-body vehicle in SI units. The body has mass, inertia and a high centre of
+// mass; every wheel has a spring/damper, tyre friction limited by the load on it,
+// and the hull collides with the ground, so the truck can slide and roll over.
+
+// GRAVITY feeds several other module-level constants below (WEIGHT, K_SPRING,
+// K_PROG) computed once at load — a live in-game planet swap would need those
+// re-derived every frame instead, which is why the menu reloads the page.
+export const GRAVITY = PLANET === 'moon' ? 1.62 : PLANET === 'verdanta' ? 9.5 : 3.71;
 const MASS = 4200; // a heavy, armoured rover
 const WEIGHT = MASS * GRAVITY;
 const CORNER = WEIGHT / 4; // static load on one wheel
@@ -15,19 +21,33 @@ const CORNER = WEIGHT / 4; // static load on one wheel
 const COM = new THREE.Vector3(0, -0.32, 0); // relative to the suspension mount plane
 const BOX = { w: 3.6, h: 2.0, l: 7.2 };
 const INERTIA = {
-  x: (MASS / 12) * (BOX.h ** 2 + BOX.l ** 2), // pitch
+  // Lower than the true box value (like yaw below) so the same accel/brake/corner
+  // torque — already computed correctly from where those forces land relative to
+  // COM — produces a squat/dive/lean that's actually visible, not just physically
+  // present. Steady-state tilt is set by the (still stiff, still quick-settling)
+  // suspension springs; this only makes the body swing into and out of it readily.
+  x: (MASS / 12) * (BOX.h ** 2 + BOX.l ** 2) * 0.6, // pitch
   y: (MASS / 12) * (BOX.w ** 2 + BOX.l ** 2) * 0.62, // yaw (lower = turns in more eagerly)
-  z: (MASS / 12) * (BOX.w ** 2 + BOX.h ** 2), // roll
+  z: (MASS / 12) * (BOX.w ** 2 + BOX.h ** 2) * 0.6, // roll
 };
 
-// Grip must stay under the rollover threshold or the tyres hold harder than the
-// rover can resist tipping, and it lies down instead of sliding. With the battery
-// floor giving a 1.39 m centre of mass and a 1.75 m half-track, that limit is
-// 1.26 g; 1.1 leaves the rover sliding first, with margin.
-const MU = 1.3; // tyre grip on dust
+// Above the ~1.26 g rollover threshold (1.39 m centre of mass, 1.75 m half-track)
+// the tyres can hold harder than the rover can resist tipping — a hard enough
+// cornering mistake can flip it (wanted, see physics.js history). Stock grip stays
+// modest on purpose: the workshop's КОЛЕСА upgrade (sim.gripMul) is what lets a
+// maxed 540 kW motor actually put its power down instead of just lighting up the
+// tyres off the line.
+const MU = 1.3; // tyre grip on dust, stock — see gripMul
 // Stiff and well damped: on Mars gravity a soft spring wallows for seconds after
 // every bump. ~1.4 Hz with 40/65 % of critical damping settles the body at once.
-const K_SPRING = (MASS * GRAVITY) / 4 / (SUSP.Lfree - SUSP.Lstatic);
+// That linear rate governs everyday ride (it's exactly what holds the static sag
+// below), same as before. A real coil spring firms up as it compresses, though —
+// K_PROG adds a quadratic term that only wakes up past the static sag, so a bigger
+// hit meets progressively more resistance instead of the same rate all the way to
+// the bump stop, with zero effect on ride height or the tuned near-static feel.
+const S_STATIC = SUSP.Lfree - SUSP.Lstatic;
+const K_SPRING = (MASS * GRAVITY) / 4 / S_STATIC;
+const K_PROG = K_SPRING / 0.15;
 const C_BUMP = 4600 * (MASS / 2500);
 const C_REBOUND = 7200 * (MASS / 2500);
 const LDOT_MAX = 6; // damper blow-off, m/s — keeps a kerb strike from spiking the damper
@@ -48,11 +68,10 @@ const CLIMB_FLOOR = 2.5;
 // Below this the suspension axis is too horizontal to reach the ground at all.
 const UP_MIN = 0.5;
 const UP_FADE = 0.8;
-// Scaled up along with V_MAX_RWD below — the old 180 kW/26 kN pair could only ever
-// hold the rover to ~45 km/h against its own rolling/regolith resistance, however
-// high the speed cap was set; pushing a heavy rover to 100 needs real power behind it.
-const F_DRIVE = 58000; // total, all four wheels
-const POWER = 520000;
+// Stock motor. The workshop's ДВИГУН upgrade scales this via sim.powerMul — 180,
+// 360 or 540 kW (see upgrades.js) — instead of this file hard-coding a fixed value.
+const F_DRIVE = 26000; // total, all four wheels, at the stock 180 kW
+const POWER = 180000;
 const V_MAX = 12; // ~43 km/h cruising, AWD mode only
 const V_MAX_BOOST = 34; // Shift only, and it drinks the battery — stays above V_MAX_RWD
 const V_MAX_REVERSE = 6;
@@ -182,6 +201,9 @@ export class VehicleSim {
     this.upY = 1; // 1 = upright, <0 = upside down
     this.maxSteer = MECH_STEER;
     this.awd = true; // true = all four driven, false = rear only (see AWD_UP/DOWN)
+    this.powerMul = 1; // set by the workshop motor upgrade — not touched by reset()
+    this.suspMul = 1; // set by the workshop suspension upgrade — how hard a hit it absorbs
+    this.gripMul = 1; // set by the workshop wheels upgrade — tyre grip on top of MU
     this.wheels = [
       { name: 'FL', s: 1, z: AXLE_Z.front, front: true },
       { name: 'FR', s: -1, z: AXLE_Z.front, front: true },
@@ -289,8 +311,8 @@ export class VehicleSim {
   driveForce(thr, speed) {
     const boost = this.cmd.boost;
     let vmax = thr > 0 ? (boost ? V_MAX_BOOST : this.awd ? V_MAX : V_MAX_RWD) : V_MAX_REVERSE;
-    const fmax = boost ? F_DRIVE * 1.4 : F_DRIVE;
-    let f = Math.min(fmax, (boost ? POWER * 1.4 : POWER) / Math.max(Math.abs(speed), 2));
+    const fmax = (boost ? F_DRIVE * 1.4 : F_DRIVE) * this.powerMul;
+    let f = Math.min(fmax, ((boost ? POWER * 1.4 : POWER) * this.powerMul) / Math.max(Math.abs(speed), 2));
     if (thr * speed >= 0) f *= 1 - smoothstep(0.8 * vmax, vmax, Math.abs(speed));
     return f * thr;
   }
@@ -412,7 +434,7 @@ export class VehicleSim {
         continue;
       }
       const Lreq = (mount.y - (g + WHEEL_R)) / up.y;
-      w.L = clamp(Lreq, SUSP.Lmin - PEN_MAX, SUSP.Lmax);
+      w.L = clamp(Lreq, SUSP.Lmin - PEN_MAX * this.suspMul, SUSP.Lmax);
       if (Lreq >= SUSP.Lmax) {
         w.Lprev = w.L;
         w.wasContact = false;
@@ -429,13 +451,18 @@ export class VehicleSim {
       w.wasContact = true;
       groundGradient(cx, cz, grad);
       const Lspring = clamp(Lreq, SUSP.Lmin, SUSP.Lmax);
-      let Fs = K_SPRING * (SUSP.Lfree - Lspring) - (Ldot < 0 ? C_BUMP : C_REBOUND) * Ldot;
+      const s = SUSP.Lfree - Lspring; // + compressed, - extended past free length
+      const dynComp = Math.max(0, s - S_STATIC); // compression beyond the static sag
+      let Fs = K_SPRING * s + K_PROG * dynComp * dynComp - (Ldot < 0 ? C_BUMP : C_REBOUND) * Ldot;
 
       // Past full compression: push only until the wheel is easing out at vWant.
-      const pen = clamp(SUSP.Lmin - Lreq, 0, PEN_MAX);
+      // The workshop suspension upgrade raises both the travel it tolerates before
+      // this engages (PEN_MAX) and how hard it's allowed to push (BUMP_STOP_MAX/
+      // C_STOP) — a bigger hit gets absorbed instead of slamming into a hard stop.
+      const pen = clamp(SUSP.Lmin - Lreq, 0, PEN_MAX * this.suspMul);
       if (pen > 0) {
         const vWant = Math.min(pen * 10, BUMP_EXIT_V);
-        if (Ldot < vWant) Fs += Math.min(BUMP_STOP_MAX, C_STOP * (vWant - Ldot));
+        if (Ldot < vWant) Fs += Math.min(BUMP_STOP_MAX * this.suspMul, C_STOP * this.suspMul * (vWant - Ldot));
       }
 
       w.contact = true;
@@ -484,7 +511,7 @@ export class VehicleSim {
           this.applyAt(tmpB, blk);
         }
       }
-      const Fs = clamp(w.Fs, 0, F_SUSP_MAX);
+      const Fs = clamp(w.Fs, 0, F_SUSP_MAX * this.suspMul);
       nrm.copy(w.n);
       dir.copy(up).multiplyScalar(0.6).addScaledVector(nrm, 0.2).addScaledVector(worldUp, 0.2).normalize();
       w.rel.set(w.cx, w.g, w.cz).sub(pos);
@@ -502,7 +529,7 @@ export class VehicleSim {
       w.vy = vy;
 
       const N = Fs;
-      const grip = MU * N;
+      const grip = MU * this.gripMul * N;
       let Fx;
       if (cmd.parked) Fx = -grip * Math.tanh(vx / 0.05);
       else {
@@ -513,9 +540,14 @@ export class VehicleSim {
       }
       let Fy = -grip * Math.tanh(vy / (cmd.parked ? 0.05 : 0.15));
       const mag = Math.hypot(Fx, Fy);
-      if (mag > grip && mag > 0) {
-        Fx *= grip / mag;
-        Fy *= grip / mag;
+      // Soft-knee onto the friction circle instead of a hard clip: comfortably under
+      // the limit this changes almost nothing, but the approach to it is a squeeze,
+      // not a wall, so breaking traction reads as a slide starting rather than a
+      // switch flipping.
+      if (mag > 0) {
+        const scale = (grip * Math.tanh(mag / grip)) / mag;
+        Fx *= scale;
+        Fy *= scale;
       }
       tmpB.copy(fw).multiplyScalar(Fx).addScaledVector(lw, Fy);
       this.applyAt(tmpB, w.rel);

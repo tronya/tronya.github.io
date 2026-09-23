@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { terrainHeight, surfaceHeight, pebbleDensity } from './terrain.js';
+import { PLANET } from './planet.js';
 
 // Loose angular rocks lying on the ground around the rover. There are only a couple
 // of thousand slots, and how many are actually there depends on where you are:
@@ -13,7 +14,7 @@ import { terrainHeight, surfaceHeight, pebbleDensity } from './terrain.js';
 // sun, the moon and the headlights like everything else, and they read as chunks of
 // rock instead of round pebbles.
 
-const GRAVITY = 3.71;
+const GRAVITY = PLANET === 'moon' ? 1.62 : PLANET === 'verdanta' ? 9.5 : 3.71;
 
 // Footprint of one tyre in the rover's own frame (half-width across, half-length along).
 const TYRE_HALF_W = 0.85;
@@ -28,10 +29,15 @@ const RESPAWN_BUDGET = 500; // per frame, so a teleport does not stall a frame
 const JITTER = 24; // how far a wrapped rock is scattered from its mirror spot
 
 // Only Martian earth tones: rust, sandstone, dusty orange and dark basalt-brown.
-// Nothing near white or grey, whichever way the light falls.
-const PALETTE = [0x4a2a1e, 0x6b3b28, 0x3a241b, 0xa5603c, 0xa8683f, 0x9a6a48, 0x5a3a2c, 0x8b4a30].map(
-  (c) => new THREE.Color(c)
-);
+// Nothing near white or grey, whichever way the light falls. The Moon has none of
+// that iron-oxide weathering — plain grey regolith chips instead. Верданта's are
+// dark basalt gravel, a couple of them mossed over green.
+const PALETTE = (PLANET === 'moon'
+  ? [0x3c3c3e, 0x545456, 0x2c2c2d, 0x707072, 0x656567, 0x5c5c5e, 0x424244, 0x48484a]
+  : PLANET === 'verdanta'
+  ? [0x1c1c1e, 0x2c2c2e, 0x141416, 0x3a3a3c, 0x333335, 0x4a5a3f, 0x2c2c2e, 0x36402e]
+  : [0x4a2a1e, 0x6b3b28, 0x3a241b, 0xa5603c, 0xa8683f, 0x9a6a48, 0x5a3a2c, 0x8b4a30]
+).map((c) => new THREE.Color(c));
 
 // A rough chunk: a dodecahedron with every vertex pushed in or out by a hash of its
 // position (so shared corners move together and the surface stays closed).
