@@ -63,6 +63,22 @@ export const PRESETS = {
     disc: 1.5,
     dir: new THREE.Vector3(0.4, 0.55, 0.75).normalize(),
   },
+  // The cloud deck that keeps Верданта's day bright and shadowless is gone by
+  // night — no moon or streetlight to light it from below, so it reads as
+  // ordinary black sky instead of a lit dome, and the companion planet/stars get
+  // to pop the way they do off-world instead of sitting on a grey haze.
+  verdantaNight: {
+    horizon: raw(0, 0, 0),
+    zenith: raw(0, 0, 0),
+    ground: raw(0, 0, 0),
+    tint: raw(0.75, 0.82, 1.0),
+    stars: 1,
+    glow: 0.04,
+    core: 0.06,
+    discA: 0.9975,
+    discB: 0.9982,
+    disc: 1.2,
+  },
 };
 
 export function createSkyMaterial() {
@@ -88,6 +104,8 @@ export function createSkyMaterial() {
       planetDir: { value: new THREE.Vector3(0, 1, 0) },
       planetTangent: { value: new THREE.Vector3(1, 0, 0) },
       planetBitangent: { value: new THREE.Vector3(0, 0, 1) },
+      planetAxis: { value: new THREE.Vector3(0, 1, 0) },
+      planetSpin: { value: 0 },
       planetColorA: { value: new THREE.Color(0xe6e5e1) },
       planetColorB: { value: new THREE.Color(0x4c4e53) },
       planetR: { value: 0 },
@@ -117,9 +135,15 @@ export function createSkyMaterial() {
       uniform vec3 planetBitangent;
       uniform vec3 planetColorA;
       uniform vec3 planetColorB;
+      uniform vec3 planetAxis;
+      uniform float planetSpin;
       uniform float planetR;
       uniform float planetGlow;
       varying vec3 vDir;
+
+      // Ring span, in planet radii.
+      const float RING_IN = 1.35;
+      const float RING_OUT = 2.15;
 
       float hash31(vec3 p) {
         p = fract(p * 0.3183099 + 0.1);
@@ -149,6 +173,17 @@ export function createSkyMaterial() {
         return s;
       }
 
+      // How much ring material a sight-line crosses at radius rho (planet radii):
+      // broad bands, a couple of clean gaps, and soft inner and outer edges.
+      float ringDensity(float rho) {
+        if (rho < RING_IN || rho > RING_OUT) return 0.0;
+        float t = (rho - RING_IN) / (RING_OUT - RING_IN);
+        float bands = 0.55 + 0.45 * sin(t * 14.0) * sin(t * 5.0 + 1.1);
+        float gaps = smoothstep(0.0, 0.05, abs(t - 0.46)) * smoothstep(0.0, 0.04, abs(t - 0.78));
+        float ends = smoothstep(0.0, 0.07, t) * (1.0 - smoothstep(0.88, 1.0, t));
+        return clamp(bands, 0.0, 1.0) * gaps * ends;
+      }
+
       void main() {
         vec3 d = normalize(vDir);
         float t = pow(clamp(d.y, 0.0, 1.0), 0.45);
@@ -170,42 +205,80 @@ export function createSkyMaterial() {
         col += tint * (pow(s, 6.0) * glow + pow(s, 60.0) * core);
         col += mix(vec3(1.0, 0.95, 0.85), tint, 0.5) * smoothstep(discA, discB, s) * disc;
 
-        // A small cratered world, fixed in the dome (see planetOrbit in sky.js) —
-        // rendered as a proper lit sphere, not a flat disc: (u, v) plus the implied
-        // depth sqrt(1 - r*r) give a real sphere normal in the planet's own frame,
-        // which is what makes the terminator (the lit/dark split) look right instead
-        // of the whole disc being evenly washed with colour.
+        // A small ringed world, fixed in the dome (see planetOrbit in sky.js),
+        // drawn as a lit sphere rather than a flat disc: (u, v) plus the implied depth
+        // sqrt(1 - r*r) give a real sphere normal in the planet's own frame, which is
+        // what makes the terminator land where it should. That same frame then carries
+        // the ring plane, so the rings, their shadow on the planet and the planet's
+        // shadow on them all fall out of one piece of geometry instead of three.
         if (planetR > 0.0) {
           float ps = dot(d, planetDir);
           vec3 rel = d - planetDir * ps;
-          float u = dot(rel, planetTangent);
-          float v = dot(rel, planetBitangent);
           float maxSin = sqrt(max(1.0 - planetR * planetR, 1e-5));
-          vec2 disc = vec2(u, v) / maxSin;
+          vec2 disc = vec2(dot(rel, planetTangent), dot(rel, planetBitangent)) / maxSin;
           float r2 = dot(disc, disc);
-          if (r2 < 1.05) {
+
+          if (r2 < RING_OUT * RING_OUT) {
+            // Planet-local frame: x = tangent, y = bitangent, z = away from the eye,
+            // because planetDir points from the camera out towards the planet. The
+            // visible half of the sphere is therefore the one at negative z — getting
+            // that sign wrong lights the planet from behind and inverts every phase.
+            vec3 axis = normalize(vec3(dot(planetTangent, planetAxis), dot(planetBitangent, planetAxis), dot(planetDir, planetAxis)));
+            vec3 sunL = vec3(dot(planetTangent, sunDir), dot(planetBitangent, sunDir), dot(planetDir, sunDir));
             float nz = sqrt(max(1.0 - min(r2, 1.0), 0.0));
-            vec3 normal = vec3(disc, nz); // in the (tangent, bitangent, planetDir) frame
+            vec3 sNormal = vec3(disc, -nz);
+            float openness = abs(axis.z); // 1 = rings face-on, 0 = edge-on
 
-            // A few big continent-like blotches plus finer grain for craters/regolith.
-            vec3 sp = normal * 2.4 + 11.0;
-            float continents = fbm3(sp);
-            float grain = fbm3(normal * 13.0 + 40.0);
-            float shade = clamp(continents * 0.72 + grain * 0.28, 0.0, 1.0);
-            vec3 surfCol = mix(planetColorB, planetColorA, smoothstep(0.3, 0.7, shade));
+            vec3 body = vec3(0.0);
+            float bodyA = 0.0;
+            if (r2 < 1.0) {
+              // Slow axial spin. Turning the point we sample is the same thing as
+              // turning the planet, and costs one Rodrigues rotation instead of a
+              // matrix upload.
+              float cs = cos(planetSpin);
+              float sn = sin(planetSpin);
+              vec3 pr = sNormal * cs + cross(axis, sNormal) * sn + axis * dot(axis, sNormal) * (1.0 - cs);
+              float shade = clamp(fbm3(pr * 2.4 + 11.0) * 0.72 + fbm3(pr * 13.0 + 40.0) * 0.28, 0.0, 1.0);
+              vec3 surfCol = mix(planetColorB, planetColorA, smoothstep(0.3, 0.7, shade));
+              float lit = clamp(dot(sNormal, sunL), 0.0, 1.0);
 
-            // Fold sunDir into the planet's own frame with three dots instead of a
-            // matrix, then light the sphere normal against it like any other surface.
-            vec3 sunLocal = vec3(dot(planetTangent, sunDir), dot(planetBitangent, sunDir), dot(planetDir, sunDir));
-            float lit = clamp(dot(normal, sunLocal), 0.0, 1.0);
-            // Almost no atmosphere means almost nothing scatters light onto the dark
-            // side — it should read close to black, not a dim grey crescent.
-            vec3 litCol = surfCol * (0.02 + 0.98 * lit);
+              // Ring shadow on the planet: walk from the surface point towards the sun
+              // and see whether it crosses the ring plane inside the rings themselves.
+              float denom = dot(sunL, axis);
+              if (abs(denom) > 0.001) {
+                float tHit = -dot(sNormal, axis) / denom;
+                if (tHit > 0.0) lit *= 1.0 - 0.75 * ringDensity(length(sNormal + sunL * tHit));
+              }
+              // Almost no atmosphere means almost nothing scatters light onto the dark
+              // side — it reads close to black, not a dim grey crescent.
+              body = surfCol * (0.02 + 0.98 * lit);
+              bodyA = 1.0;
+            }
 
-            // A real body blocks whatever is behind it — mix (replace), not add, or
-            // it reads as a translucent smear of light instead of a solid disc.
+            // The rings. In this orthographic impostor a sight-line runs straight down
+            // the depth axis, so where it meets the ring plane is one division.
+            vec3 ring = vec3(0.0);
+            float ringA = 0.0;
+            if (openness > 0.02) {
+              float w = -dot(disc, axis.xy) / axis.z;
+              vec3 rp = vec3(disc, w);
+              float dens = ringDensity(length(rp));
+              // The sphere hides any ring lying behind its near surface.
+              bool hidden = r2 < 1.0 && w > -nz;
+              if (dens > 0.0 && !hidden) {
+                float tc = -dot(rp, sunL);
+                float shadow = (tc > 0.0 && length(rp + sunL * tc) < 1.0) ? 0.22 : 1.0;
+                ring = mix(planetColorB, planetColorA, 0.5 + 0.3 * sin(length(rp) * 9.0)) * shadow;
+                // Seen edge-on the same dust covers far less screen, so thin it out.
+                ringA = dens * mix(0.25, 0.9, openness);
+              }
+            }
+
+            // A real body blocks whatever is behind it — mix (replace), not add, or it
+            // reads as a translucent smear of light instead of a solid disc.
             float edge = smoothstep(1.0, 0.965, r2);
-            col = mix(col, litCol, edge);
+            col = mix(col, body, edge * bodyA);
+            col = mix(col, ring, ringA);
             col += planetColorA * pow(max(ps, 0.0), 80.0) * planetGlow * (1.0 - edge);
           }
         }
@@ -216,6 +289,7 @@ export function createSkyMaterial() {
 }
 
 const DAY = PLANET === 'moon' ? PRESETS.moonDay : PLANET === 'verdanta' ? PRESETS.verdantaDay : PRESETS.day;
+const NIGHT = PLANET === 'verdanta' ? PRESETS.verdantaNight : PRESETS.night;
 
 // Blend the two presets by how high the sun is, so dusk and dawn pass through
 // smoothly instead of snapping between day and night.
@@ -223,7 +297,7 @@ const _c = new THREE.Color();
 export function updateSky(material, sunDir, daylight, planet) {
   const u = material.uniforms;
   const d = DAY;
-  const n = PRESETS.night;
+  const n = NIGHT;
   u.sunDir.value.copy(sunDir).normalize();
   u.horizon.value.copy(n.horizon).lerp(_c.copy(d.horizon), daylight);
   u.zenith.value.copy(n.zenith).lerp(_c.copy(d.zenith), daylight);
@@ -240,8 +314,11 @@ export function updateSky(material, sunDir, daylight, planet) {
     u.planetDir.value.copy(planet.dir);
     u.planetTangent.value.copy(planet.tangent);
     u.planetBitangent.value.copy(planet.bitangent);
-    u.planetR.value = 0.998; // ~3.6° across — still bigger than a realistic disc, but the
-    // first pass (~11°) filled a third of the screen and looked like a mistake, not a moon.
+    u.planetAxis.value.copy(planet.axis);
+    u.planetSpin.value = planet.spin;
+    u.planetR.value = 0.9985; // ~3.1° of sphere, ~6.7° once the rings are counted. An
+    // earlier pass at ~11° of bare sphere filled a third of the screen and read as a
+    // mistake rather than a moon, so the rings, not the rock, carry the size now.
     u.planetGlow.value = 0.04; // almost no atmosphere to haze its edge — should read crisp, not glowing
   } else {
     u.planetR.value = 0;
@@ -262,8 +339,15 @@ const _pBit = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
 _pTan.crossVectors(_worldUp, _pDir).normalize();
 _pBit.crossVectors(_pDir, _pTan).normalize();
-const _planet = { dir: _pDir, tangent: _pTan, bitangent: _pBit };
-export function planetOrbit() {
+// Tilt of the spin axis, and with it the ring plane. Chosen so the rings sit maybe
+// 20° off edge-on from here: face-on reads as a flat bullseye and dead edge-on
+// disappears into a line, and neither looks like a planet.
+const _pAxis = new THREE.Vector3(0.2, 0.9, 0.35).normalize();
+const _planet = { dir: _pDir, tangent: _pTan, bitangent: _pBit, axis: _pAxis, spin: 0 };
+export function planetOrbit(timeOfDay) {
+  // One turn per sol. It is the only thing in that sky that moves, and a world you can
+  // watch turning is worth the one cosine it costs.
+  _planet.spin = (timeOfDay || 0) * Math.PI * 2;
   return _planet;
 }
 
@@ -274,6 +358,6 @@ export function planetOrbit() {
 // exactly the horizon colour and distant terrain melts into the sky.
 const _mix = new THREE.Color();
 export function horizonColor(daylight, out) {
-  _mix.copy(PRESETS.night.horizon).lerp(_c.copy(DAY.horizon), daylight);
+  _mix.copy(NIGHT.horizon).lerp(_c.copy(DAY.horizon), daylight);
   return out.setRGB(_mix.r, _mix.g, _mix.b, THREE.SRGBColorSpace);
 }

@@ -35,7 +35,9 @@ const JITTER = 24; // how far a wrapped rock is scattered from its mirror spot
 const PALETTE = (PLANET === 'moon'
   ? [0x3c3c3e, 0x545456, 0x2c2c2d, 0x707072, 0x656567, 0x5c5c5e, 0x424244, 0x48484a]
   : PLANET === 'verdanta'
-  ? [0x1c1c1e, 0x2c2c2e, 0x141416, 0x3a3a3c, 0x333335, 0x4a5a3f, 0x2c2c2e, 0x36402e]
+  // Weathered basalt gravel, a few chips mossed over. Kept well off black: against
+  // Верданта's green these used to read as holes in the ground rather than stones.
+  ? [0x4a4a4c, 0x5c5c5e, 0x3c3c3e, 0x6a6a6a, 0x545456, 0x5e6b4a, 0x484a46, 0x525c42]
   : [0x4a2a1e, 0x6b3b28, 0x3a241b, 0xa5603c, 0xa8683f, 0x9a6a48, 0x5a3a2c, 0x8b4a30]
 ).map((c) => new THREE.Color(c));
 

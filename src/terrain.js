@@ -251,10 +251,67 @@ const CRATERS = PLANET === 'moon'
 // contour of a slow noise field, which is naturally sinuous for free — no path-
 // finding or distance search needed, just evaluate it at (x, z) like every other
 // height/colour term here. Only Верданта has one.
+export const RIVER_HALF = 17; // metres from the centre line to the bank
+export const RIVER_DEPTH = 4; // how deep the channel is cut at the centre line
+const RIVER_F = 0.0011;
+const _rn = (x, z) => fbm(x * RIVER_F + 500, z * RIVER_F - 300, 3) - 0.5;
 function riverAmount(x, z) {
   if (PLANET !== 'verdanta') return 0;
-  const n = fbm(x * 0.0011 + 500, z * 0.0011 - 300, 3) - 0.5;
-  return 1 - smooth(0, 0.035, Math.abs(n));
+  const n = _rn(x, z);
+  // Distance to the centre line in *metres*, not in noise value. Dividing by the
+  // local gradient is what converts one into the other, and it is the whole reason
+  // the channel keeps its width: thresholding the raw value instead made the river
+  // 400 m across wherever the noise happened to flatten out and a hairline wherever
+  // it steepened, which is why it read as a stain rather than as a river. Forward
+  // differences, not central — two extra noise taps instead of four, and the extra
+  // accuracy would not survive the smoothstep anyway.
+  const e = 9;
+  const gx = (_rn(x + e, z) - n) / e;
+  const gz = (_rn(x, z + e) - n) / e;
+  const grad = Math.max(Math.sqrt(gx * gx + gz * gz), 1e-7);
+  return 1 - smooth(0, RIVER_HALF, Math.abs(n) / grad);
+}
+
+// How far up the channel the water line sits. The surface is therefore at
+// bank - RIVER_DEPTH * RIVER_FILL, which puts it above the ground exactly where
+// riverAmount > RIVER_FILL and under it everywhere else — see water.js.
+export const RIVER_FILL = 0.5;
+
+// Height of the ground the river cut its channel into — the bank level. The channel
+// is carved out of this, so anything that needs to know where the water sits (see
+// water.js) can reconstruct it without a second copy of the terrain formula.
+export function riverBankHeight(x, z) {
+  return terrainHeight(x, z) + riverAmount(x, z) * RIVER_DEPTH;
+}
+export function riverDepthAt(x, z) {
+  return riverAmount(x, z);
+}
+
+// The one place anything asks "is there water here, and how deep": the splash spray,
+// the wake, the drag on the wheels and the surface mesh itself all read these two,
+// so they can never disagree about where the waterline is.
+export function waterDepthAt(x, z) {
+  if (PLANET !== 'verdanta') return 0;
+  const d = (riverAmount(x, z) - RIVER_FILL) * RIVER_DEPTH;
+  return d > 0 ? d : 0;
+}
+export function waterLevelAt(x, z) {
+  return terrainHeight(x, z) + (riverAmount(x, z) - RIVER_FILL) * RIVER_DEPTH;
+}
+
+// How thick the moss is at a point, 0..1. It does not fade evenly outwards from the
+// water the way the first version did — that read as a painted gradient. Real moss
+// fields (the Icelandic ones this planet is modelled on) grow in irregular cushions
+// with bare rock showing between them, so a patch field does most of the shaping and
+// the distance to water only decides where moss is possible at all. Shared with
+// grass.js, which plants its tufts wherever this is already high, so the 3D tufts and
+// the painted green can never disagree about where the moss is.
+function mossAmount(x, z, steep) {
+  const river = riverAmount(x, z);
+  if (river <= 0) return 0;
+  const patchy = smooth(0.34, 0.7, fbm(x * 0.021 + 33, z * 0.021 - 71, 3));
+  const fine = smooth(0.15, 0.45, fbm(x * 0.2, z * 0.2, 2));
+  return clamp(river * 2.4, 0, 1) * (1 - steep) * (0.12 + 0.88 * patchy) * (0.55 + 0.45 * fine);
 }
 
 // Bucket the craters by x so a lookup touches only a few.
@@ -357,7 +414,7 @@ function verdantaHeight(x, z) {
 
   // The river carves its own shallow valley so it actually sits low instead of
   // just being painted onto flat ground (see verdantaColorAt for the water/moss).
-  h -= riverAmount(x, z) * 7;
+  h -= riverAmount(x, z) * RIVER_DEPTH;
 
   const wall = wallAmount(x, z);
   if (wall > 0) h += wall * (32 + 58 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
@@ -617,7 +674,8 @@ const pale = new THREE.Color(P.pale);
 const rust = new THREE.Color(P.rust);
 const roadCol = new THREE.Color(P.roadCol);
 const mossCol = new THREE.Color(0x5c7a3f);
-const waterCol = new THREE.Color(0x2f7d8a);
+const mossLit = new THREE.Color(0x8fab55); // sunlit tops of the thickest cushions
+const waterCol = new THREE.Color(0x2a6570);
 const _c = new THREE.Color();
 
 // Heights for the tile plus a one-cell margin. computeVertexNormals() only sees the
@@ -715,8 +773,13 @@ function groundColorAt(x, z, y, normalY, out) {
   // carved its channel in verdantaHeight.
   if (PLANET === 'verdanta') {
     const river = riverAmount(x, z);
-    const moss = clamp(river * 2.2, 0, 1) * (1 - steep) * (0.5 + 0.5 * smooth(0.15, 0.45, m));
-    out.lerp(mossCol, moss * 0.75);
+    const moss = mossAmount(x, z, steep);
+    out.lerp(mossCol, moss * 0.92);
+    // The thickest cushions catch the light and go noticeably yellower. That
+    // two-tone green is most of what separates moss from flat green paint, and
+    // squaring `moss` keeps the highlight to the deep patches instead of smearing
+    // it over every faintly-green pixel.
+    out.lerp(mossLit, moss * moss * 0.5);
     out.lerp(waterCol, clamp((river - 0.55) * 2.4, 0, 1));
   }
   return out;
@@ -739,14 +802,10 @@ export function groundColorAtXZ(x, z, out = new THREE.Color()) {
 // Always 0 off Верданта.
 export function vegetationAmount(x, z) {
   if (PLANET !== 'verdanta') return 0;
-  const river = riverAmount(x, z);
-  if (river <= 0) return 0;
-  const m = fbm(x * 0.2, z * 0.2, 2);
   const dx = (terrainHeight(x + _gcEps, z) - terrainHeight(x - _gcEps, z)) / (2 * _gcEps);
   const dz = (terrainHeight(x, z + _gcEps) - terrainHeight(x, z - _gcEps)) / (2 * _gcEps);
   const normalY = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
-  const steep = smooth(0.24, 0.58, 1 - normalY);
-  return clamp(river * 2.2, 0, 1) * (1 - steep) * (0.5 + 0.5 * smooth(0.15, 0.45, m));
+  return mossAmount(x, z, smooth(0.24, 0.58, 1 - normalY));
 }
 
 function tileGeometry(seg) {
@@ -832,9 +891,15 @@ export function createTerrain(anisotropy = 8) {
     scl.set(stone.r, stone.h, stone.r);
     m4.compose(posV, q, scl);
     im.setMatrixAt(n, m4);
-    const shade = 0.2 + 0.18 * hash(ci + 77, cj + 12);
-    const sat = PLANET === 'moon' ? 0.03 : PLANET === 'verdanta' ? 0.1 : 0.38;
-    const hue = PLANET === 'verdanta' ? 0.42 : 0.045;
+    // Верданта's boulders were nearly black, and against its bright moss that read
+    // as holes punched in the ground rather than as rock. Basalt is dark, but not
+    // that dark next to green — lifting the lightness and pulling the hue towards
+    // the ground's own grey-green is what makes them sit in the landscape.
+    const lo = PLANET === 'verdanta' ? 0.3 : 0.2;
+    const span = PLANET === 'verdanta' ? 0.22 : 0.18;
+    const shade = lo + span * hash(ci + 77, cj + 12);
+    const sat = PLANET === 'moon' ? 0.03 : PLANET === 'verdanta' ? 0.05 : 0.38;
+    const hue = PLANET === 'verdanta' ? 0.28 : 0.045;
     _c.setHSL(hue + 0.03 * hash(ci, cj + 3), sat, stone.big ? shade * 0.85 : shade);
     im.setColorAt(n, _c);
   }

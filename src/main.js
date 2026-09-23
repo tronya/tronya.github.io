@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildVehicle, WHEEL_R, SUSP } from './vehicle.js';
 import { VehicleSim, PLANET } from './physics.js';
-import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale } from './terrain.js';
+import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
 import { createGrass } from './grass.js';
+import { createWater } from './water.js';
+import { createSplash } from './splash.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
 import { createDebris } from './debris.js';
@@ -158,7 +160,7 @@ function applyTimeOfDay(timeOfDay) {
   look.env = lerp(n.env, d.env);
   look.exposure = lerp(n.exposure, d.exposure);
 
-  const orbit = PLANET === 'verdanta' ? planetOrbit() : null;
+  const orbit = PLANET === 'verdanta' ? planetOrbit(timeOfDay) : null;
   updateSky(sky.material, sunDir, k, orbit);
   horizonColor(k, scene.fog.color);
   if (orbit) {
@@ -225,6 +227,10 @@ const sand = createSand();
 scene.add(sand.points);
 const grass = createGrass(); // no-op off Верданта
 scene.add(grass.group);
+const water = createWater(); // the river surface; also a no-op off Верданта
+scene.add(water.group);
+const splash = createSplash(); // spray off the wheels, same deal
+scene.add(splash.group);
 scene.add(tracks.mesh);
 
 const sim = new VehicleSim();
@@ -232,6 +238,7 @@ const sim = new VehicleSim();
   const sp = roadSpawn(false);
   sim.reset(sp.x, sp.z, sp.yaw);
 }
+water.prime?.(sim.pos.x, sim.pos.z); // so a rover spawned in a river sees water on frame 1
 const vehicle = buildVehicle();
 scene.add(vehicle.root);
 const W = vehicle.wheels.map((w, i) => ({ ...w, sim: sim.wheels[i], spinAngle: 0 }));
@@ -1081,6 +1088,14 @@ function frame() {
   sim.powerMul = upgrades.mul('motor');
   sim.suspMul = upgrades.mul('suspension');
   sim.gripMul = upgrades.mul('wheels');
+  // Wading costs you: water piles up against the hull and the wheels lose bite. This
+  // rides the same runtime multipliers the workshop upgrades drive, so the feel of
+  // water needs nothing added to the physics itself.
+  const wade = Math.min(1, waterDepthAt(sim.pos.x, sim.pos.z) / 1.1);
+  if (wade > 0) {
+    sim.powerMul *= 1 - 0.5 * wade;
+    sim.gripMul *= 1 - 0.28 * wade;
+  }
   const chargeMul = upgrades.mul('panels');
   const drawMul = upgrades.mul('battery');
 
@@ -1200,6 +1215,8 @@ function frame() {
   sandCtx.tail.z = sim.pos.z - fz * 3.4;
   sand.update(dt, sandCtx);
   grass.update(dt, sandCtx);
+  water.update(dt, sandCtx);
+  splash.update(dt, sandCtx);
   dust.update(dt, sandCtx);
 
   if (PLANET === 'mars') {
@@ -1269,6 +1286,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, grass, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();
