@@ -53,6 +53,14 @@ const POWER = 180000;
 const V_MAX = 12; // ~43 km/h cruising
 const V_MAX_BOOST = 22; // Shift only, and it drinks the battery
 const V_MAX_REVERSE = 6;
+// Below AWD_UP the front axle stays engaged for traction over rough ground; past it
+// the front hubs disengage and only the rear wheels drive — less drivetrain to spin
+// up, so it clears a bit more top speed, and main.js reads `sim.awd` to cut the
+// battery draw to match. Separate up/down thresholds (hysteresis) so cruising right
+// at the switch point doesn't clatter the front axle in and out every second.
+const AWD_UP = 20 / 3.6;
+const AWD_DOWN = 16 / 3.6;
+const V_MAX_RWD_BONUS = 1.12;
 // Steering behaves like a wheel, not a spring: the angle stays where it is left.
 const MECH_STEER = 0.56; // mechanical lock at the knuckle
 // Time to wind the wheel from centre to full lock. Scaling the rate to the current
@@ -171,6 +179,7 @@ export class VehicleSim {
     this.speed = 0; // forward speed, m/s
     this.upY = 1; // 1 = upright, <0 = upside down
     this.maxSteer = MECH_STEER;
+    this.awd = true; // true = all four driven, false = rear only (see AWD_UP/DOWN)
     this.wheels = [
       { name: 'FL', s: 1, z: AXLE_Z.front, front: true },
       { name: 'FR', s: -1, z: AXLE_Z.front, front: true },
@@ -278,7 +287,8 @@ export class VehicleSim {
 
   driveForce(thr, speed) {
     const boost = this.cmd.boost;
-    const vmax = thr > 0 ? (boost ? V_MAX_BOOST : V_MAX) : V_MAX_REVERSE;
+    let vmax = thr > 0 ? (boost ? V_MAX_BOOST : V_MAX) : V_MAX_REVERSE;
+    if (!this.awd && thr > 0 && !boost) vmax *= V_MAX_RWD_BONUS;
     const fmax = boost ? F_DRIVE * 1.4 : F_DRIVE;
     let f = Math.min(fmax, (boost ? POWER * 1.4 : POWER) / Math.max(Math.abs(speed), 2));
     if (thr * speed >= 0) f *= 1 - smoothstep(0.8 * vmax, vmax, Math.abs(speed));
@@ -363,6 +373,11 @@ export class VehicleSim {
     torque.set(0, 0, 0);
     const steer = ackermann(cmd.steer);
     const speed = vel.dot(fwd);
+    // Only forward speed disengages the front axle — reversing or crawling over
+    // rough ground always keeps all four driven for traction.
+    if (this.awd && speed > AWD_UP) this.awd = false;
+    else if (!this.awd && speed < AWD_DOWN) this.awd = true;
+    const driven = this.awd ? 4 : 2;
 
     // Pass 1: where is the ground under each wheel, how compressed is each spring.
     fh.set(fwd.x, 0, fwd.z);
@@ -482,7 +497,9 @@ export class VehicleSim {
       if (cmd.parked) Fx = -grip * Math.tanh(vx / 0.05);
       else {
         const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * N + (DRAG_V2 * vx * vx) / 4;
-        Fx = this.driveForce(cmd.throttle, speed) / 4 - resist * Math.tanh(vx / 0.4);
+        const isDriven = this.awd || !w.front;
+        const drive = isDriven ? this.driveForce(cmd.throttle, speed) / driven : 0;
+        Fx = drive - resist * Math.tanh(vx / 0.4);
       }
       let Fy = -grip * Math.tanh(vy / (cmd.parked ? 0.05 : 0.15));
       const mag = Math.hypot(Fx, Fy);

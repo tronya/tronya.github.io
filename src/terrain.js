@@ -367,6 +367,29 @@ function stoneInCell(ci, cj) {
   return true;
 }
 
+// Rocks tall enough to actually block the rover (see src/sonar.js), within `radius`
+// of (x,z). Same cell-hash scan `groundHeight`/the near-shadow rocks use — cheap
+// enough to run every sonar tick. `out` is reused across calls, no per-scan alloc.
+export function findObstacles(x, z, radius, minH, out = []) {
+  out.length = 0;
+  const ci0 = Math.floor((x - radius) / STONE_CELL);
+  const cj0 = Math.floor((z - radius) / STONE_CELL);
+  const span = Math.ceil((2 * radius) / STONE_CELL) + 2;
+  const r2 = radius * radius;
+  for (let dj = 0; dj < span; dj++) {
+    for (let di = 0; di < span; di++) {
+      if (!stoneInCell(ci0 + di, cj0 + dj)) continue;
+      if (stone.h < minH) continue;
+      const dx = stone.x - x;
+      const dz = stone.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      out.push({ x: stone.x, z: stone.z, r: stone.r, h: stone.h, d: Math.sqrt(d2) });
+    }
+  }
+  return out;
+}
+
 // Terrain plus any rock the wheel is standing on.
 export function groundHeight(x, z) {
   let h = terrainHeight(x, z);

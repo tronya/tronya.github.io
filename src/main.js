@@ -10,6 +10,7 @@ import { createSand } from './sand.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
 import { createDustTrail } from './dust.js';
+import { createSonar, MAX_BIAS as SONAR_MAX_BIAS } from './sonar.js';
 import { createMinimap3D } from './minimap3d.js';
 import { createSkyMaterial, updateSky, horizonColor } from './sky.js';
 
@@ -203,6 +204,10 @@ function makeDustTexture() {
 const dustTex = makeDustTexture();
 const dust = createDustTrail();
 scene.add(dust.group);
+const sonar = createSonar(vehicle.root);
+scene.add(sonar.group);
+let sonarScan = { warnObstacle: null, avoidBias: 0 };
+let sonarWarned = false;
 
 // ---------- headlights, cab glow ----------
 const headlights = [];
@@ -778,11 +783,17 @@ function autopilotInput() {
   if (!route.length) return { throttle: 0, steer: 0, brake: 1, boost: false };
 
   const tgt = route[0];
-  const want = Math.atan2(tgt.x - sim.pos.x, tgt.z - sim.pos.z);
+  const want = Math.atan2(tgt.x - sim.pos.x, tgt.z - sim.pos.z) + sonarScan.avoidBias;
+  // A rock dead ahead with no clear side (avoidBias pinned near its max both ways
+  // cancel toward the corridor centre, but the beam still reports it as crowded):
+  // ease off rather than forcing the turn through it.
+  const dodgeLoad = Math.abs(sonarScan.avoidBias) / SONAR_MAX_BIAS;
+  // A hard swerve at full speed is how it nearly tipped over — bleed off real speed
+  // (not just throttle) once the dodge gets serious, so the turn happens slower.
   return {
-    throttle: clamp((10.5 - sim.speed) * 0.6, -1, 1),
+    throttle: clamp((10.5 - sim.speed) * 0.6, -1, 1) * (1 - 0.7 * dodgeLoad),
     steerTo: clamp(wrapAngle(want - sim.yaw()) * 1.5, -1, 1),
-    brake: 0,
+    brake: dodgeLoad > 0.55 ? (dodgeLoad - 0.55) * 1.4 : 0,
     boost: false,
   };
 }
@@ -867,6 +878,17 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
+  // Scanned from last frame's position — one frame of lag, not worth chasing — so
+  // autopilotInput() (called inside readInput below) already sees this tick's bias.
+  sonarScan = sonar.update(dt, sim.pos.x, sim.pos.z, sim.yaw());
+  if (sonarScan.warnObstacle && !sonarWarned) {
+    sonarWarned = true;
+    flash(`Сонар: перешкода за ${Math.round(sonarScan.warnObstacle.d)} м`);
+    if (audio) audio.beep(620);
+  } else if (!sonarScan.warnObstacle) {
+    sonarWarned = false;
+  }
+
   if (!stepRighting(dt)) sim.update(dt, readInput(t));
   else sim.update(0.0001, { throttle: 0, steer: 0, brake: 1 });
 
@@ -944,7 +966,9 @@ function frame() {
 
   // Charging needs the wings fully open and the sun above the horizon.
   power.charge = power.panels > 0.99 ? CHARGE_PEAK * Math.max(0, sunDir.y) : 0;
-  power.draw = DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1);
+  // Rear-only drive spins up half the drivetrain, so it costs less to hold the same
+  // throttle — the payoff for giving up front-axle traction above AWD_UP.
+  power.draw = DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8);
   const wasEmpty = power.battery <= 0;
   power.battery = clamp(power.battery + (power.charge - power.draw) * dt, 0, BATTERY_MAX);
   if (!wasEmpty && power.battery <= 0) {
@@ -1057,7 +1081,7 @@ function frame() {
     }
   }
 
-  hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год`;
+  hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год · ${sim.awd ? '4×4' : '4×2'}`;
   drawCompass(
     sim.yaw(),
     route.map((p, i) => ({
@@ -1090,6 +1114,6 @@ window.addEventListener('resize', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, missions, dust, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, missions, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();
