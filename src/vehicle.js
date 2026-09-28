@@ -1,16 +1,16 @@
 import * as THREE from 'three';
+import { lamp } from './glow.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CHASSIS, SPEC, WHEEL_DEFS, steerAngle } from './chassis.js';
 
 // Vehicle-local space: origin on the suspension mount plane, forward = +Z, left = +X.
 // Ground sits WHEEL_R + L below the mount plane, so y = -1.43 at static ride height.
-const WHEEL_SCALE = 1.2; // wheel model is built at radius 0.855, then scaled up
+const WHEEL_SCALE = SPEC.wheelScale; // wheel model is built at radius 0.855, then scaled up
 export const WHEEL_R = 0.855 * WHEEL_SCALE;
-export const WHEEL_X = 1.75;
-const HULL_W = 3.1; // narrower than the track, so the tyres are the widest point
-export const AXLE_Z = { front: 2.4, rear: -2.4 };
-export const WHEELBASE = AXLE_Z.front - AXLE_Z.rear;
+export const WHEEL_X = SPEC.wheelX;
+const HULL_W = SPEC.hullW; // narrower than the track, so the tyres are the widest point
 // Suspension length = distance from the mount plane down to the wheel centre.
-export const SUSP = { Lmin: 0.15, Lmax: 0.72, Lfree: 0.52, Lstatic: 0.465 };
+export const SUSP = SPEC.susp;
 
 const std = (color, metalness = 0, roughness = 0.6, extra = {}) =>
   new THREE.MeshStandardMaterial({ color, metalness, roughness, ...extra });
@@ -29,14 +29,14 @@ const M = {
   suitOrange: std(0x8a4a22, 0, 0.7),
   visor: std(0xc98a2e, 0.85, 0.15),
   // Unlit, so the running lights read as emissive at night.
-  amber: new THREE.MeshBasicMaterial({ color: 0xff9420 }),
-  amberDim: new THREE.MeshBasicMaterial({ color: 0xa8560f }),
+  amber: new THREE.MeshBasicMaterial({ color: lamp(0xff9420) }),
+  amberDim: new THREE.MeshBasicMaterial({ color: lamp(0xa8560f, 2) }),
   // Painted steel, not a lamp: as an unlit material the coil springs glowed under
   // the rover all night.
   spring: std(0x9c4a16, 0.55, 0.45),
-  headlight: new THREE.MeshBasicMaterial({ color: 0xd8c49a }),
-  tail: new THREE.MeshBasicMaterial({ color: 0x7e1a0b }),
-  screen: new THREE.MeshBasicMaterial({ color: 0xff8a2a }),
+  headlight: new THREE.MeshBasicMaterial({ color: lamp(0xd8c49a, 5) }),
+  tail: new THREE.MeshBasicMaterial({ color: lamp(0x7e1a0b, 2) }),
+  screen: new THREE.MeshBasicMaterial({ color: lamp(0xff8a2a, 2.5) }),
 };
 function solarTexture() {
   const c = document.createElement('canvas');
@@ -179,14 +179,20 @@ const SPRING_GEO = new THREE.TubeGeometry(new Helix(8, 0.085), 220, 0.028, 6, fa
 
 // ---------- wheel ----------
 
-const halfProfile = [
-  [0.34, 0.36], [0.56, 0.37], [0.73, 0.32], [0.815, 0.2], [0.835, 0],
-];
+// [radius, half-width] from the bead out to the tread centre. The crawler runs fat,
+// low-pressure balloon tyres: nearly half again as wide, with a round shoulder
+// instead of the scout's squared-off one.
+const CRAWLER = CHASSIS === 'crawler';
+const halfProfile = CRAWLER
+  ? [[0.36, 0.5], [0.52, 0.53], [0.64, 0.52], [0.74, 0.47], [0.805, 0.38], [0.84, 0.26], [0.855, 0.12], [0.858, 0]]
+  : [[0.34, 0.36], [0.56, 0.37], [0.73, 0.32], [0.815, 0.2], [0.835, 0]];
+const RIM_FACE = CRAWLER ? 0.43 : 0.3; // how far out the rim faces sit
+export const TYRE_HALF_W = halfProfile[1][1] * WHEEL_SCALE;
 const tireGeo = new THREE.LatheGeometry(
   [...halfProfile.map(([r, a]) => [r, -a]), ...halfProfile.slice(0, -1).reverse().map(([r, a]) => [r, a])].map(
     ([r, a]) => new THREE.Vector2(r, a)
   ),
-  40
+  CRAWLER ? 56 : 40
 );
 const lugGeo = new THREE.BoxGeometry(0.3, 0.1, 0.26);
 const spokeGeo = new THREE.BoxGeometry(0.09, 0.42, 0.14);
@@ -204,24 +210,64 @@ function buildWheel() {
     tire.rotation.z = Math.PI / 2;
     parts.add(tire);
 
-    // Two staggered rows of chunky tread blocks.
-    const LUGS = 18;
-    for (let i = 0; i < LUGS; i++) {
-      const pivot = new THREE.Group();
-      pivot.rotation.x = (i * Math.PI * 2) / LUGS;
-      for (const k of [-1, 1]) {
-        const lug = new THREE.Mesh(lugGeo, M.tire);
-        lug.position.set(k * 0.17, 0.795, k * 0.06);
-        lug.rotation.y = k * 0.3;
-        pivot.add(lug);
+    if (CRAWLER) {
+      // Chevron tread wrapping round the shoulder: a centre block and two blocks
+      // tipped over onto each rounded edge, so the tyre reads round, not square.
+      const LUGS = 20;
+      for (let i = 0; i < LUGS; i++) {
+        const pivot = new THREE.Group();
+        pivot.rotation.x = (i * Math.PI * 2) / LUGS;
+        const c = new THREE.Mesh(lugGeo, M.tire);
+        c.position.set(0, 0.825, 0);
+        c.scale.set(0.8, 0.9, 0.8);
+        pivot.add(c);
+        for (const k of [-1, 1]) {
+          const lug = new THREE.Mesh(lugGeo, M.tire);
+          lug.position.set(k * 0.3, 0.79, k * 0.08);
+          lug.rotation.set(0, k * 0.4, -k * 0.5);
+          pivot.add(lug);
+          const edge = new THREE.Mesh(lugGeo, M.tire);
+          edge.position.set(k * 0.46, 0.68, -k * 0.05);
+          edge.rotation.set(0, 0, -k * 1.0);
+          edge.scale.set(0.6, 0.8, 0.7);
+          pivot.add(edge);
+        }
+        parts.add(pivot);
       }
-      parts.add(pivot);
+    } else {
+      // Two staggered rows of chunky tread blocks.
+      const LUGS = 18;
+      for (let i = 0; i < LUGS; i++) {
+        const pivot = new THREE.Group();
+        pivot.rotation.x = (i * Math.PI * 2) / LUGS;
+        for (const k of [-1, 1]) {
+          const lug = new THREE.Mesh(lugGeo, M.tire);
+          lug.position.set(k * 0.17, 0.795, k * 0.06);
+          lug.rotation.y = k * 0.3;
+          pivot.add(lug);
+        }
+        parts.add(pivot);
+      }
     }
 
     // Ten-spoke rim, recessed into the tyre on both faces.
     for (const side of [-1, 1]) {
       const face = new THREE.Group();
-      face.position.x = side * 0.3;
+      face.position.x = side * RIM_FACE;
+      if (CRAWLER) {
+        // Beadlock ring: a bolted clamp band round the rim lip.
+        const lock = new THREE.Mesh(new THREE.TorusGeometry(0.53, 0.035, 6, 40), M.metalDark);
+        lock.rotation.y = Math.PI / 2;
+        lock.position.x = side * 0.02;
+        face.add(lock);
+        for (let i = 0; i < 16; i++) {
+          const a = (i * Math.PI * 2) / 16;
+          const b = new THREE.Mesh(boltGeo, M.metal);
+          b.rotation.z = Math.PI / 2;
+          b.position.set(side * 0.05, Math.cos(a) * 0.53, Math.sin(a) * 0.53);
+          face.add(b);
+        }
+      }
       const ring = new THREE.Mesh(rimRingGeo, M.rim);
       ring.rotation.y = Math.PI / 2;
       face.add(ring);
@@ -264,6 +310,8 @@ function buildWheel() {
 // ---------- suspension corner: wishbones, coil-over, drive shaft ----------
 
 function buildCorner(shell, root, s, z) {
+  // Drawn for the scout's 1.75 m half-track; a wider track pushes the outboard ends.
+  const ox = WHEEL_X - 1.75;
   const arms = Array.from({ length: 4 }, () => new THREE.Mesh(UNIT, M.metalDark));
   const spring = new THREE.Mesh(SPRING_GEO, M.spring);
   const damper = new THREE.Mesh(UNIT, M.black);
@@ -272,7 +320,7 @@ function buildCorner(shell, root, s, z) {
   const knuckle = box(0.14, 0.44, 0.24, M.metalDark, 0, 0, 0);
   root.add(...arms, spring, damper, piston, shaft, knuckle);
 
-  const top = V(s * 0.95, 0.55, z);
+  const top = V(s * (0.95 + ox), 0.55, z);
   const bot = V(0, 0, 0);
   const pA = V(0, 0, 0);
   const pB = V(0, 0, 0);
@@ -288,16 +336,16 @@ function buildCorner(shell, root, s, z) {
   shell.add(box(0.42, 0.3, 0.42, M.black, diff.x, diff.y, diff.z));
 
   return (L) => {
-    lowOut.set(s * 1.22, -L - 0.1, z);
-    upOut.set(s * 1.2, -L + 0.28, z);
+    lowOut.set(s * (1.22 + ox), -L - 0.1, z);
+    upOut.set(s * (1.2 + ox), -L + 0.28, z);
     place(arms[0], lowIn[0], lowOut, 0.055);
     place(arms[1], lowIn[1], lowOut, 0.055);
     place(arms[2], upIn[0], upOut, 0.045);
     place(arms[3], upIn[1], upOut, 0.045);
-    knuckle.position.set(s * 1.24, -L + 0.08, z);
-    place(shaft, diff, V(s * 1.2, -L, z), 0.055);
+    knuckle.position.set(s * (1.24 + ox), -L + 0.08, z);
+    place(shaft, diff, V(s * (1.2 + ox), -L, z), 0.055);
 
-    bot.set(s * 1.0, -L - 0.08, z);
+    bot.set(s * (1.0 + ox), -L - 0.08, z);
     place(spring, pA.lerpVectors(bot, top, 0.06), pB.lerpVectors(top, bot, 0.06), 1);
     place(damper, bot, pA.lerpVectors(bot, top, 0.5), 0.055);
     place(piston, top, pA.lerpVectors(top, bot, 0.55), 0.032);
@@ -327,13 +375,13 @@ const PANEL_L = 1.25;
 const PANEL_D = 1.9;
 const panelGeo = new THREE.BoxGeometry(PANEL_L, 0.05, PANEL_D);
 
-function buildPanels(root) {
+function buildPanels(root, at = { x: 1.28, y: 1.41, z: -2.05 }) {
   const hinges = [];
   for (const s of [-1, 1]) {
     // Inner segment hinges at the deck edge; the sides sit at slightly different
     // heights so they nest instead of z-fighting when folded.
     const inner = new THREE.Group();
-    inner.position.set(s * 1.28, 1.41 + (s > 0 ? 0 : 0.14), -2.05);
+    inner.position.set(s * at.x, at.y + (s > 0 ? 0 : 0.14), at.z);
     root.add(inner);
     inner.add(mesh(panelGeo, M.solar, (s * PANEL_L) / 2, 0, 0));
     inner.add(box(0.06, 0.09, PANEL_D * 0.92, M.panelBack, s * 0.06, -0.06, 0));
@@ -359,6 +407,70 @@ function buildPanels(root) {
   };
 }
 
+// The crawler's array: nine panels in a 3×3 grid that open in two stages. First the
+// two side wings flip out from on top of the centre panel; then, from all three of
+// those, a leaf swings out fore and aft. Folded it is one low pack on the cage roof.
+const ARR_W = 1.3; // wing width; the centre panel is two of these
+const ARR_D = 1.9;
+function buildArray(root, at) {
+  const panel = (w) => {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.BoxGeometry(w, 0.04, ARR_D), M.solar, 0, 0, 0));
+    g.add(box(w * 0.94, 0.05, 0.06, M.panelBack, 0, -0.035, 0));
+    g.add(box(0.06, 0.05, ARR_D * 0.94, M.panelBack, 0, -0.035, 0));
+    return g;
+  };
+  const leaves = [];
+  // Fore and aft leaves on a panel of width w centred at x. They fold back over the
+  // panel's own face, at two heights so the pair nests instead of intersecting.
+  function addLeaves(parent, w, x) {
+    for (const d of [1, -1]) {
+      const hinge = new THREE.Group();
+      hinge.position.set(x, d > 0 ? 0.05 : 0.1, (d * ARR_D) / 2);
+      const leaf = panel(w - 0.04);
+      leaf.position.z = (d * ARR_D) / 2;
+      hinge.add(leaf);
+      hinge.add(box(w * 0.9, 0.04, 0.05, M.metalDark, 0, -0.02, 0)); // hinge barrel
+      parent.add(hinge);
+      leaves.push({ hinge, d });
+    }
+  }
+
+  const base = new THREE.Group();
+  base.position.set(0, at.y, at.z);
+  root.add(base);
+  base.add(panel(ARR_W * 2));
+  addLeaves(base, ARR_W * 2, 0);
+
+  // Wings hinge on short posts at the centre panel's edges, high enough to fold over
+  // the centre panel's own folded leaves.
+  const WING_Y = 0.3;
+  const wings = [];
+  for (const s of [-1, 1]) {
+    base.add(box(0.08, WING_Y, 0.08, M.metalDark, s * ARR_W, WING_Y / 2, ARR_D * 0.4));
+    base.add(box(0.08, WING_Y, 0.08, M.metalDark, s * ARR_W, WING_Y / 2, -ARR_D * 0.4));
+    const hinge = new THREE.Group();
+    hinge.position.set(s * ARR_W, WING_Y, 0);
+    base.add(hinge);
+    const wing = panel(ARR_W - 0.04);
+    wing.position.x = (s * ARR_W) / 2;
+    hinge.add(wing);
+    addLeaves(hinge, ARR_W - 0.04, (s * ARR_W) / 2);
+    wings.push({ s, hinge });
+  }
+
+  const ease = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  return (t) => {
+    const e1 = ease(t / 0.5); // wings
+    const e2 = ease((t - 0.5) / 0.5); // then the leaves
+    // Folded, each wing lies upside down over its own half of the centre panel.
+    for (const { s, hinge } of wings) hinge.rotation.z = s * (1 - e1) * Math.PI;
+    // Leaves swing up and over the top: +z leaves turn negative about x, -z positive.
+    for (const { hinge, d } of leaves) hinge.rotation.x = -d * (1 - e2) * Math.PI;
+    base.rotation.x = e2 * 0.06; // a slight tilt to the sky once fully open
+  };
+}
+
 // A wheel-arch band in the ZY plane, extruded across x.
 function fenderProfile(z0) {
   return [
@@ -368,22 +480,10 @@ function fenderProfile(z0) {
   ];
 }
 
-// Ackermann geometry: the inner front wheel turns more than the outer one.
-export function ackermann(delta) {
-  const a = Math.abs(delta);
-  if (a < 1e-4) return { left: 0, right: 0 };
-  const R = WHEELBASE / Math.tan(a);
-  const inner = Math.atan(WHEELBASE / (R - WHEEL_X));
-  const outer = Math.atan(WHEELBASE / (R + WHEEL_X));
-  return delta > 0 ? { left: inner, right: outer } : { left: -outer, right: -inner };
-}
+// ---------- bodies ----------
 
-// ---------- vehicle ----------
-
-export function buildVehicle() {
-  const root = new THREE.Group();
-  const shell = new THREE.Group(); // static body, merged at the end
-
+// ГЕРМЕС-3, the four-wheel scout: long low wedge, greenhouse cab, armoured box aft.
+function truckBody(shell, root) {
   // Exposed chassis spine and skid plate, visible between the wheels.
   shell.add(box(1.5, 0.5, 5.4, M.black, 0, -0.2, 0));
   shell.add(box(2.5, 0.12, 4.6, M.armorDark, 0, -0.52, 0.1));
@@ -404,7 +504,7 @@ export function buildVehicle() {
 
   // Angular fender flares; the tyres rise past them as in the reference.
   for (const s of [-1, 1]) {
-    for (const z of [AXLE_Z.front, AXLE_Z.rear]) {
+    for (const z of SPEC.axleZ) {
       shell.add(extrude(fenderProfile(z), 0.46, M.armorDark, 0.05, s * (HULL_W / 2 + 0.18), 0, 0));
     }
     // Sill runner with a glowing strip underneath.
@@ -487,14 +587,258 @@ export function buildVehicle() {
   yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.028, 8, 20), M.black));
   root.add(yokePivot);
 
-  // Wheels + suspension.
-  const defs = [
-    { name: 'FL', s: 1, z: AXLE_Z.front, front: true },
-    { name: 'FR', s: -1, z: AXLE_Z.front, front: true },
-    { name: 'RL', s: 1, z: AXLE_Z.rear, front: false },
-    { name: 'RR', s: -1, z: AXLE_Z.rear, front: false },
+  return { yokePivot, setPanels, tailLamps: [V(0.95, 0.5, -3.66), V(-0.95, 0.5, -3.66)] };
+}
+
+// ---------- sculpted shapes (crawler) ----------
+
+// A rounded rectangle in the XY plane, counter-clockwise seen from +z. Top and bottom
+// corners take separate radii; every section has the same point count so they loft.
+function rrect(w, yb, yt, rt, rb = rt, seg = 5) {
+  const hw = w / 2;
+  const h = yt - yb;
+  rt = Math.min(rt, hw, h / 2);
+  rb = Math.min(rb, hw, h / 2);
+  const corners = [
+    [hw - rb, yb + rb, rb, -Math.PI / 2],
+    [hw - rt, yt - rt, rt, 0],
+    [-hw + rt, yt - rt, rt, Math.PI / 2],
+    [-hw + rb, yb + rb, rb, Math.PI],
   ];
-  const wheels = defs.map((d) => {
+  const pts = [];
+  for (const [cx, cy, r, a0] of corners) {
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + (i / seg) * (Math.PI / 2);
+      pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+    }
+  }
+  return pts;
+}
+
+// Skin a run of rounded sections (ascending z) into one smooth hull, capped flat at
+// both ends. This is what takes the crawler off the box: noses taper, roofs roll
+// over, edges catch a highlight instead of ending in a hard corner.
+function loft(list, mat) {
+  const S = list.map((q) => rrect(q.w, q.yb, q.yt, q.rt, q.rb ?? q.rt));
+  const n = S[0].length;
+  const pos = [];
+  list.forEach((q, k) => { for (const [x, y] of S[k]) pos.push(x, y, q.z); });
+  const idx = [];
+  for (let k = 0; k < list.length - 1; k++) {
+    for (let i = 0; i < n; i++) {
+      const a = k * n + i;
+      const b = k * n + ((i + 1) % n);
+      const c = a + n;
+      const d = b + n;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const skin = new THREE.BufferGeometry();
+  skin.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  skin.setIndex(idx);
+  skin.computeVertexNormals();
+
+  const cap = [];
+  for (const [k, dir] of [[0, -1], [list.length - 1, 1]]) {
+    const P = S[k];
+    const z = list[k].z;
+    let cx = 0;
+    let cy = 0;
+    for (const [x, y] of P) { cx += x / n; cy += y / n; }
+    for (let i = 0; i < n; i++) {
+      const [x0, y0] = P[i];
+      const [x1, y1] = P[(i + 1) % n];
+      if (dir > 0) cap.push(cx, cy, z, x0, y0, z, x1, y1, z);
+      else cap.push(cx, cy, z, x1, y1, z, x0, y0, z);
+    }
+  }
+  const caps = new THREE.BufferGeometry();
+  caps.setAttribute('position', new THREE.Float32BufferAttribute(cap, 3));
+  caps.computeVertexNormals();
+
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(skin, mat), new THREE.Mesh(caps, mat));
+  return g;
+}
+
+// A rounded bar of constant section between z0 and z1, ends eased in.
+const bar = (w, yb, yt, r, z0, z1, mat, x = 0, ease = 0.08) => {
+  const g = loft([
+    { z: z0, w: w - ease * 2, yb: yb + ease, yt: yt - ease, rt: r },
+    { z: z0 + ease, w, yb, yt, rt: r },
+    { z: z1 - ease, w, yb, yt, rt: r },
+    { z: z1, w: w - ease * 2, yb: yb + ease, yt: yt - ease, rt: r },
+  ], mat);
+  g.position.x = x;
+  return g;
+};
+
+// A bent tube through the given points (smooth, not kinked).
+function bentTube(points, r, mat) {
+  const curve = new THREE.CatmullRomCurve3(points.map((p) => V(...p)), false, 'centripetal');
+  return new THREE.Mesh(new THREE.TubeGeometry(curve, points.length * 12, r, 8, false), mat);
+}
+
+// ТИТАН-6, the six-wheel crawler: a narrow, tapered armoured tub slung between the
+// wheels so all six fat tyres stand bare, with no arches over them; a rounded
+// cab-over with a raked screen up front; an open deck under a bent-tube cage aft,
+// with the solar array folded on the cage roof.
+function crawlerBody(shell, root) {
+  const D = 0.6; // deck height
+
+  // Tub: tapered, chamfered nose and tail, rounded bilge. The tyres start 1.43 m out.
+  shell.add(loft([
+    { z: -4.7, w: 2.1, yb: -0.2, yt: 0.46, rt: 0.16, rb: 0.2 },
+    { z: -4.45, w: 2.46, yb: -0.46, yt: D, rt: 0.2, rb: 0.32 },
+    { z: 3.9, w: 2.5, yb: -0.5, yt: D, rt: 0.2, rb: 0.32 },
+    { z: 4.45, w: 2.3, yb: -0.28, yt: D - 0.02, rt: 0.2, rb: 0.3 },
+    { z: 4.72, w: 1.86, yb: 0.02, yt: 0.52, rt: 0.2, rb: 0.2 },
+  ], M.armor));
+  shell.add(box(2.0, 0.1, 8.0, M.armorDark, 0, -0.56, 0));
+  for (const s of [-1, 1]) shell.add(box(0.18, 0.3, 8.8, M.metalDark, s * 1.08, -0.34, 0));
+  for (const z of [-4.1, -1.7, 1.7, 4.1]) shell.add(box(2.3, 0.14, 0.18, M.black, 0, -0.44, z));
+
+  for (const s of [-1, 1]) {
+    // Rounded lockers and marker strips in the gaps between the wheels.
+    for (const z of [-1.67, 1.67]) {
+      shell.add(bar(0.24, -0.1, 0.5, 0.08, z - 0.5, z + 0.5, M.armorDark, s * 1.28));
+      shell.add(box(0.02, 0.4, 0.03, M.black, s * 1.41, 0.2, z));
+      shell.add(box(0.05, 0.05, 0.8, M.amber, s * 1.41, -0.16, z));
+    }
+  }
+
+  // Cab-over: armoured lower half, then a glass bubble with a raked screen under a
+  // rolled armour roof. The glass is a hull of its own so the crew show through it.
+  shell.add(loft([
+    { z: 1.5, w: 2.78, yb: D - 0.05, yt: 1.12, rt: 0.12, rb: 0.05 },
+    { z: 4.15, w: 2.78, yb: D - 0.05, yt: 1.12, rt: 0.12, rb: 0.05 },
+    { z: 4.62, w: 2.2, yb: D - 0.05, yt: 1.02, rt: 0.2, rb: 0.05 },
+  ], M.armor));
+  shell.add(loft([
+    { z: 1.58, w: 2.6, yb: 1.08, yt: 1.86, rt: 0.42, rb: 0.02 },
+    { z: 3.6, w: 2.58, yb: 1.08, yt: 1.84, rt: 0.42, rb: 0.02 },
+    { z: 4.05, w: 2.42, yb: 1.08, yt: 1.66, rt: 0.36, rb: 0.02 },
+    { z: 4.4, w: 2.2, yb: 1.08, yt: 1.14, rt: 0.03, rb: 0.02 },
+  ], M.glass));
+  shell.add(loft([
+    { z: 1.45, w: 2.7, yb: 1.6, yt: 1.94, rt: 0.45, rb: 0.04 },
+    { z: 3.45, w: 2.68, yb: 1.6, yt: 1.92, rt: 0.45, rb: 0.04 },
+    { z: 3.78, w: 2.5, yb: 1.6, yt: 1.84, rt: 0.38, rb: 0.04 },
+  ], M.armorLit));
+  shell.add(loft([
+    { z: 1.44, w: 2.66, yb: 1.08, yt: 1.9, rt: 0.44, rb: 0.03 },
+    { z: 1.56, w: 2.66, yb: 1.08, yt: 1.9, rt: 0.44, rb: 0.03 },
+  ], M.armor));
+  for (const s of [-1, 1]) {
+    shell.add(bentTube([[s * 1.1, 1.1, 4.42], [s * 1.2, 1.5, 4.18], [s * 1.28, 1.78, 3.72]], 0.06, M.armor));
+    shell.add(box(0.05, 0.04, 2.3, M.amberDim, s * 1.4, 1.1, 2.95));
+    // Mirrors on stalks.
+    shell.add(bentTube([[s * 1.3, 1.4, 4.1], [s * 1.6, 1.5, 4.2], [s * 1.78, 1.52, 4.18]], 0.025, M.metalDark));
+    shell.add(bar(0.07, 1.36, 1.72, 0.03, 4.08, 4.3, M.black, s * 1.8, 0.02));
+  }
+  // Roof light bar (the long-range beam lives in it, see mounts.far).
+  shell.add(bar(2.2, 1.9, 2.06, 0.07, 3.28, 3.5, M.black, 0, 0.03));
+  shell.add(box(1.9, 0.06, 0.04, M.headlight, 0, 1.97, 3.52));
+  for (const s of [-1, 1]) shell.add(box(0.12, 0.1, 0.05, M.amber, s * 1.02, 1.97, 3.52));
+  // Sensor mast with a round head.
+  shell.add(tube([-0.9, 1.9, 2.0], [-0.9, 2.62, 2.0], 0.04, M.metalDark));
+  shell.add(cyl(0.2, 0.2, 0.24, M.black, -0.9, 2.72, 2.0, 'x'));
+  shell.add(cyl(0.12, 0.12, 0.26, M.glass, -0.9, 2.72, 2.02, 'x'));
+  shell.add(tube([0.9, 1.9, 1.9], [0.9, 2.9, 1.9], 0.02, M.metalDark));
+
+  // Nose: rolled bumper, winch, round lamps in pods.
+  shell.add(loft([
+    { z: 4.5, w: 3.0, yb: -0.34, yt: 0.06, rt: 0.16 },
+    { z: 4.82, w: 3.0, yb: -0.34, yt: 0.06, rt: 0.16 },
+    { z: 4.98, w: 2.6, yb: -0.3, yt: 0.0, rt: 0.14 },
+  ], M.armorDark));
+  shell.add(cyl(0.13, 0.13, 0.95, M.metal, 0, -0.14, 5.02, 'x'));
+  for (const s of [-1, 1]) {
+    shell.add(cyl(0.2, 0.22, 0.2, M.black, s * 1.0, 0.32, 4.6, 'z'));
+    shell.add(cyl(0.16, 0.16, 0.04, M.headlight, s * 1.0, 0.32, 4.7, 'z'));
+    shell.add(cyl(0.05, 0.05, 0.04, M.amber, s * 1.36, 0.1, 4.95, 'z'));
+    shell.add(bentTube([[s * 1.35, -0.14, 4.9], [s * 1.34, 0.3, 4.72], [s * 1.2, 0.56, 4.5]], 0.05, M.metalDark));
+  }
+
+  // Interior.
+  shell.add(box(2.3, 0.24, 0.36, M.black, 0, 0.94, 3.9));
+  for (const x of [-0.55, 0.55]) {
+    shell.add(box(0.42, 0.02, 0.22, M.screen, x, 1.07, 3.85));
+    shell.add(box(0.56, 0.12, 0.56, M.black, x, 0.71, 2.7));
+    shell.add(box(0.56, 0.7, 0.1, M.black, x, 1.07, 2.35));
+  }
+  for (const [x, suit] of [[0.55, M.suitOrange], [-0.55, M.suit]]) {
+    const pilot = buildPilot(x, suit);
+    pilot.position.y += 0.35;
+    pilot.position.z += 1.55;
+    shell.add(pilot);
+  }
+  shell.add(tube([0.55, 0.98, 3.8], [0.55, 1.15, 3.28], 0.028, M.black));
+
+  // Cargo deck with rolled edge rails, and a bent-tube cage: three hoops that round
+  // over at the shoulders, tied by rails that sit on those shoulders.
+  shell.add(box(2.9, 0.08, 5.9, M.armorLit, 0, D, -1.5));
+  for (let i = 0; i < 7; i++) shell.add(box(2.8, 0.03, 0.05, M.armorDark, 0, D + 0.05, -4.2 + i * 0.85));
+  for (const s of [-1, 1]) shell.add(tube([s * 1.45, D + 0.08, 1.4], [s * 1.45, D + 0.08, -4.4], 0.06, M.metalDark));
+  const cy = 1.8;
+  const hoop = (z) => bentTube([
+    [-1.35, D, z], [-1.35, cy - 0.35, z], [-1.22, cy - 0.08, z], [-0.95, cy, z],
+    [0.95, cy, z], [1.22, cy - 0.08, z], [1.35, cy - 0.35, z], [1.35, D, z],
+  ], 0.06, M.metalDark);
+  for (const z of [1.4, -1.5, -4.35]) shell.add(hoop(z));
+  for (const s of [-1, 1]) {
+    shell.add(tube([s * 1.24, cy - 0.06, 1.4], [s * 1.24, cy - 0.06, -4.35], 0.055, M.metalDark));
+    shell.add(tube([s * 1.35, D + 0.1, 0.9], [s * 1.3, cy - 0.3, -1.5], 0.04, M.metalDark));
+  }
+
+  // Load: rounded crates, a capsule fuel cell lying lengthwise, a spare at the tail.
+  shell.add(bar(0.95, D, D + 0.72, 0.08, 0.08, 1.02, M.armorDark, 0.62, 0.03));
+  shell.add(bar(0.95, D, D + 0.52, 0.08, -0.98, -0.04, M.panelBack, 0.62, 0.03));
+  shell.add(box(0.96, 0.05, 0.9, M.amberDim, 0.62, D + 0.5, 0.55));
+  const tank = mesh(new THREE.CapsuleGeometry(0.36, 1.5, 6, 16), M.metal, -0.72, D + 0.41, -1.2);
+  tank.rotation.x = Math.PI / 2;
+  shell.add(tank);
+  for (const z of [-0.6, -1.8]) shell.add(cyl(0.38, 0.38, 0.08, M.armorDark, -0.72, D + 0.41, z, 'z'));
+  const spare = mesh(new THREE.TorusGeometry(0.46, 0.2, 12, 28), M.tire, 0, D + 0.68, -3.95);
+  shell.add(spare);
+  shell.add(cyl(0.3, 0.3, 0.3, M.rim, 0, D + 0.68, -3.95, 'z'));
+
+  // Tail: rolled panel and bumper.
+  shell.add(loft([
+    { z: -4.66, w: 2.9, yb: 0.12, yt: 0.64, rt: 0.12 },
+    { z: -4.54, w: 2.9, yb: 0.12, yt: 0.64, rt: 0.12 },
+  ], M.armor));
+  shell.add(loft([
+    { z: -4.9, w: 2.6, yb: -0.36, yt: -0.02, rt: 0.14 },
+    { z: -4.78, w: 3.0, yb: -0.38, yt: 0.02, rt: 0.16 },
+    { z: -4.45, w: 3.0, yb: -0.38, yt: 0.02, rt: 0.16 },
+  ], M.armorDark));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.6, 0.12, 0.05, M.tail, s * 1.0, 0.45, -4.68));
+    shell.add(cyl(0.05, 0.05, 0.04, M.amber, s * 1.4, 0.24, -4.68, 'z'));
+    shell.add(bentTube([[s * 1.35, D, -4.35], [s * 1.33, 0.2, -4.6], [s * 1.2, -0.18, -4.7]], 0.05, M.metalDark));
+  }
+
+  const setPanels = buildArray(root, { y: cy + 0.1, z: -1.45 });
+
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0.55, 1.17, 3.17);
+  yokePivot.rotation.x = -0.45;
+  yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.028, 8, 20), M.black));
+  root.add(yokePivot);
+
+  return { yokePivot, setPanels, tailLamps: [V(1.0, 0.45, -4.68), V(-1.0, 0.45, -4.68)] };
+}
+
+// ---------- vehicle ----------
+
+export function buildVehicle() {
+  const root = new THREE.Group();
+  const shell = new THREE.Group(); // static body, merged at the end
+  const { yokePivot, setPanels, tailLamps } = (CHASSIS === 'crawler' ? crawlerBody : truckBody)(shell, root);
+
+  // Wheels + suspension, one corner per entry in the shared wheel table.
+  const wheels = WHEEL_DEFS.map((d) => {
     const setCorner = buildCorner(shell, root, d.s, d.z);
     const hub = new THREE.Group();
     const steer = new THREE.Group();
@@ -502,7 +846,7 @@ export function buildVehicle() {
     steer.add(spin);
     hub.add(steer);
     root.add(hub);
-    return { ...d, x: d.s * WHEEL_X, hub, steer, spin, setCorner };
+    return { ...d, hub, steer, spin, setCorner };
   });
 
   root.add(mergeStatic(shell));
@@ -519,21 +863,18 @@ export function buildVehicle() {
   }
 
   // 0 = running lights, 1 = on the brakes.
-  const tailDim = new THREE.Color(0x7e1a0b);
-  const tailLit = new THREE.Color(0xff3a1c);
+  const tailDim = lamp(0x7e1a0b, 2);
+  const tailLit = lamp(0xff3a1c, 6);
   function setBrake(k) {
     M.tail.color.copy(tailDim).lerp(tailLit, k);
   }
 
-  function setSteer(delta) {
-    const { left, right } = ackermann(delta);
-    for (const w of wheels) if (w.front) w.steer.rotation.y = w.s > 0 ? left : right;
+  function setSteer(delta, speed = 0) {
+    for (const w of wheels) w.steer.rotation.y = steerAngle(w, delta, speed);
     yokePivot.rotation.z = -delta * 2.5;
   }
 
   wheels.forEach((_, i) => setSuspension(i, SUSP.Lstatic));
   setPanels(0);
-  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, TAIL_LAMPS: [
-    new THREE.Vector3(0.95, 0.5, -3.66), new THREE.Vector3(-0.95, 0.5, -3.66),
-  ] };
+  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, TAIL_LAMPS: tailLamps, MOUNTS: SPEC.mounts };
 }

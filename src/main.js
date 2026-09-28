@@ -1,6 +1,12 @@
 import * as THREE from 'three';
+import { GLOW } from './glow.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildVehicle, WHEEL_R, SUSP } from './vehicle.js';
+import { createPost, tagLayers } from './post.js';
+import { createSunShadows } from './sunshadow.js';
+import { createAmbient } from './ambient.js';
+import { createBeams } from './beams.js';
+import { CHASSIS, SPEC, CHASSIS_LIST, WHEEL_DEFS, setChassis } from './chassis.js';
 import { VehicleSim, PLANET } from './physics.js';
 import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt } from './terrain.js';
 import { buildBase } from './base.js';
@@ -12,6 +18,7 @@ import { createWater } from './water.js';
 import { createSplash } from './splash.js';
 import { createFlashback } from './flashback.js';
 import { progress, hasSave, newGame, travelTo, consumeSkipMenu, FLASHBACK_AT, FLASHBACK_REWARD } from './progress.js';
+import { createStory } from './story.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
 import { createDebris } from './debris.js';
@@ -34,12 +41,14 @@ const BATTERY_MAX = 100;
 const DRAW_IDLE = 0.12; // %/s just being alive
 const DRAW_DRIVE = 0.62; // %/s at full power
 const CHARGE_PEAK = 1.5; // %/s with the wings open and the sun overhead
-const PANEL_SECONDS = 2.6; // time to unfold or stow
+// Time to unfold or stow; the crawler's array opens in two stages, so it takes longer.
+const PANEL_SECONDS = CHASSIS === 'crawler' ? 4.2 : 2.6;
 const LOW_BATTERY = 20;
 const BOOST_DRAW = 4.5; // Shift is fast but drinks the pack
 // Default camera: low behind the truck.
-const CAM_BACK = 13;
-const CAM_UP = 2;
+// The crawler is 2.5 m longer; at the scout's distance it filled the frame.
+const CAM_BACK = CHASSIS === 'crawler' ? 16 : 13;
+const CAM_UP = CHASSIS === 'crawler' ? 2.6 : 2;
 // Cinematic camera modes, cycled with C. Chase/far still turn with the truck's
 // heading and can be dragged/zoomed by hand (same trick as the default camera);
 // top-down and orbit are fully automatic and lock out manual control.
@@ -210,7 +219,7 @@ for (const b of BASES) {
   beacons.push({ ...built, x: b.x, z: b.z });
 }
 
-const tracks = createTracks();
+const tracks = createTracks(WHEEL_DEFS.length);
 const drawSize = new THREE.Vector2();
 const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 }, tail: { on: false, x: 0, y: 0, z: 0 } };
 const roadPosts = createRoadPosts();
@@ -268,13 +277,15 @@ const sonar = createSonar(vehicle.root);
 scene.add(sonar.group); // the ping markers — visible whenever upgrades.unlocked('sonar') is
 let sonarScan = { warnObstacle: null, avoidBias: 0 };
 let sonarWarned = false;
+let storyClock = 0;
 
 // ---------- headlights, cab glow ----------
 const headlights = [];
 const glows = [];
+const MOUNT = vehicle.MOUNTS;
 for (const side of [-1, 1]) {
   const spot = new THREE.SpotLight(0xfff2d6, 0, 110, 0.44, 0.7, 2);
-  spot.position.set(side * 0.8, 0.36, 3.7);
+  spot.position.set(side * MOUNT.head.x, MOUNT.head.y, MOUNT.head.z);
   // One beam casts the shadows; two look the same from the driver's seat and cost double.
   spot.castShadow = side < 0;
   spot.shadow.mapSize.set(512, 512);
@@ -283,7 +294,7 @@ for (const side of [-1, 1]) {
   spot.shadow.bias = -0.0004;
   spot.shadow.normalBias = 0.05;
   const aim = new THREE.Object3D();
-  aim.position.set(side * 0.55, -1.9, 32);
+  aim.position.set(side * MOUNT.head.aimX, -1.9, 32);
   spot.target = aim;
   vehicle.root.add(spot, aim);
   headlights.push(spot);
@@ -291,7 +302,7 @@ for (const side of [-1, 1]) {
   const glow = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: dustTex, color: 0xfff2d6, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false })
   );
-  glow.position.set(side * 0.8, 0.36, 3.84);
+  glow.position.set(side * MOUNT.head.x, MOUNT.head.y, MOUNT.head.glowZ);
   glow.scale.setScalar(0.55);
   vehicle.root.add(glow);
   glows.push(glow);
@@ -299,7 +310,7 @@ for (const side of [-1, 1]) {
 // The roof bar is a long-range spot: a narrow, strong beam that reaches far ahead of
 // the two headlights. It is on with full headlights only.
 const farLight = new THREE.SpotLight(0xfff6e4, 0, 800, 0.13, 0, 2);
-farLight.position.set(0, 1.4, 2.0);
+farLight.position.set(0, MOUNT.far.y, MOUNT.far.z);
 // It casts shadows too, so rocks far down the beam are not flat blobs. The narrow cone
 // keeps the map sharp: ~1 cm per texel a hundred metres out.
 farLight.castShadow = true;
@@ -368,16 +379,22 @@ const tailLights = vehicle.TAIL_LAMPS.map((p) => {
 // beneath the body too, which read as a glow coming from under the truck.
 const markerLights = [-1, 1].map((side) => {
   const l = new THREE.SpotLight(0xffa030, 0, 6, 0.6, 1, 2);
-  l.position.set(side * 1.55, -0.2, 0.1);
+  l.position.set(side * MOUNT.marker.x, MOUNT.marker.y, MOUNT.marker.z);
   const aim = new THREE.Object3D();
-  aim.position.set(side * 4.2, -1.6, 0.1);
+  aim.position.set(side * (MOUNT.marker.x + 2.65), -1.6, MOUNT.marker.z);
   l.target = aim;
   vehicle.root.add(l, aim);
   return l;
 });
 
+// Air you can see: dust devils and blown sand, pollen and fireflies, river mist
+// (ambient.js); and the headlight beams themselves (beams.js).
+const ambient = createAmbient();
+scene.add(ambient.group);
+const beams = createBeams(vehicle.root, MOUNT);
+
 const cabLight = new THREE.PointLight(0xff9a3c, 0, 3, 2);
-cabLight.position.set(0, 1.0, 1.7); // short reach: it lit the ground under the whole body
+cabLight.position.set(0, MOUNT.cab.y, MOUNT.cab.z); // short reach: it lit the ground under the whole body
 vehicle.root.add(cabLight);
 
 function toggleSand() {
@@ -513,15 +530,54 @@ function refreshPlanets() {
   }
 }
 
+// ---------- radio traffic ----------
+// Lines queue rather than overwrite: a briefing is several of them, and control
+// talking over itself would be worse than making the player wait a beat. Click to
+// skip ahead; a line that is already the last one just closes the panel.
+const story = createStory();
+const commsEl = document.getElementById('comms');
+const commsFrom = document.getElementById('commsFrom');
+const commsText = document.getElementById('commsText');
+const commsMore = document.getElementById('commsMore');
+const commsQueue = [];
+let commsUntil = 0;
+
+function showNextComms() {
+  const line = commsQueue.shift();
+  if (!line) { commsEl.classList.remove('show'); return; }
+  const [from, text] = line;
+  commsFrom.textContent = from;
+  commsText.textContent = text;
+  commsMore.textContent = commsQueue.length ? `ще ${commsQueue.length} →` : 'клік — закрити';
+  commsEl.classList.add('show');
+  // Long lines get longer on screen, but never less than a beat to notice them.
+  commsUntil = clock.elapsedTime + Math.max(3.4, Math.min(9, text.length * 0.055));
+  if (audio) audio.beep(660, 0.05);
+}
+
+function say(lines) {
+  if (!lines || !lines.length) return;
+  commsQueue.push(...lines);
+  if (!commsEl.classList.contains('show')) showNextComms();
+}
+commsEl.addEventListener('click', showNextComms);
+
+function storyCtx() {
+  return {
+    planet: PLANET,
+    scrap: debris.collectedCount(),
+    delivered: missions.deliveredCount(),
+    upgradeLevels: UPGRADE_BRANCHES.reduce((n, b) => n + upgrades.level(b.id), 0),
+    flashbackDone: progress.flashbackDone,
+  };
+}
+
 function refreshChapter() {
-  const done = missions.deliveredCount();
-  if (PLANET === 'moon') {
-    chapterEl.textContent = progress.flashbackDone ? 'Флешбек пройдено' : 'Знайти уламки Гермес-1';
-  } else if (PLANET === 'verdanta') {
-    chapterEl.textContent = 'Розділ 2 · нова земля';
-  } else {
-    chapterEl.textContent = done >= 4 ? 'Розділ 1 пройдено · Верданта відкрита' : `Розділ 1 · модулі ${done}/4`;
+  if (story.finished) {
+    chapterEl.textContent = 'ЗАВДАННЯ · вільний політ';
+    return;
   }
+  chapterEl.textContent = `ЗАВДАННЯ ${story.index + 1}/${story.total} · ${story.objective(storyCtx()).text}`;
 }
 
 for (const p of ['mars', 'moon', 'verdanta']) {
@@ -532,6 +588,16 @@ for (const p of ['mars', 'moon', 'verdanta']) {
 }
 refreshPlanets();
 refreshChapter();
+
+// Chassis choice sits beside the planet row: it is garage state, not story state,
+// so it survives a new game and never touches the save.
+for (const c of CHASSIS_LIST) {
+  const btn = document.getElementById(`chassis-${c.id}`);
+  btn.textContent = c.name;
+  btn.classList.toggle('on', c.id === CHASSIS);
+  btn.addEventListener('click', () => { if (c.id !== CHASSIS) setChassis(c.id); });
+}
+document.getElementById('startTag').textContent = SPEC.tag;
 
 // ---------- start screen ----------
 // The world behind this is already built, so Продовжити is instant; only Нова гра
@@ -1070,7 +1136,8 @@ function frame() {
   if (menuOpen) {
     // Hold everything — clock included — so the sol does not run and the battery
     // does not drain while the player is still deciding.
-    renderer.render(scene, camera);
+    sunShadows.update();
+    post.render();
     requestAnimationFrame(frame);
     return;
   }
@@ -1105,7 +1172,7 @@ function frame() {
   sim.origin(origin);
   vehicle.root.position.copy(origin);
   vehicle.root.quaternion.copy(sim.quat);
-  vehicle.setSteer(sim.cmd.steer);
+  vehicle.setSteer(sim.cmd.steer, sim.speed);
 
   // The roof spot's rectangular beam is drawn through its shadow camera, and that
   // camera's own `up` never rotates with its parent — only its position and look
@@ -1244,7 +1311,7 @@ function frame() {
   for (const b of beacons) {
     const isTarget = Math.abs(b.x - trip.target.x) < 1 && Math.abs(b.z - trip.target.z) < 1;
     const k = isTarget ? 0.45 + 0.55 * pulse : 0.3 + 0.2 * pulse;
-    b.beacon.material.color.setRGB(0.15 * k, 0.78 * k, k);
+    b.beacon.material.color.setRGB(0.15 * k, 0.78 * k, k).multiplyScalar(GLOW);
     b.beam.material.opacity = (isTarget ? 0.2 : 0.09) * (0.55 + 0.45 * pulse);
     b.halo.material.opacity = (isTarget ? 0.9 : 0.45) * (0.5 + 0.5 * pulse);
     b.halo.scale.setScalar(isTarget ? 0.052 + 0.022 * pulse : 0.034);
@@ -1271,19 +1338,39 @@ function frame() {
   sandCtx.vz = sim.vel.z;
   sandCtx.wheels = sim.wheels;
   sandCtx.daylight = daylight;
+  sandCtx.sunDir = sunDir;
+  sandCtx.sunColor = sun.color;
+  sandCtx.sunIntensity = sun.intensity;
+  sandCtx.fog = scene.fog;
   sandCtx.pxPerUnit = renderer.getDrawingBufferSize(drawSize).y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
   sandCtx.head.on = lampLevel() >= 2;
-  sandCtx.head.x = sim.pos.x + fx * 3.6;
+  sandCtx.head.x = sim.pos.x + fx * (MOUNT.head.z - 0.1);
   sandCtx.head.y = sim.pos.y - 0.9;
-  sandCtx.head.z = sim.pos.z + fz * 3.6;
+  sandCtx.head.z = sim.pos.z + fz * (MOUNT.head.z - 0.1);
   sandCtx.head.dx = fx;
   sandCtx.head.dz = fz;
   // Tail lamps: on with any lamp mode (not just full headlights), aimed backwards
   // right along the dust trail — see dust.js's night-brightness trick.
   sandCtx.tail.on = lampLevel() >= 1;
-  sandCtx.tail.x = sim.pos.x - fx * 3.4;
+  sandCtx.tail.x = sim.pos.x + fx * (vehicle.TAIL_LAMPS[0].z + 0.26);
   sandCtx.tail.y = sim.pos.y - 0.4;
-  sandCtx.tail.z = sim.pos.z - fz * 3.4;
+  sandCtx.tail.z = sim.pos.z + fz * (vehicle.TAIL_LAMPS[0].z + 0.26);
+  {
+    // Morning mist peaks just after sunrise and is gone within the hour.
+    const dawn = Math.max(0, 1 - Math.abs(timeOfDay - SUNRISE - 0.035) / 0.07);
+    const air = ambient.update(dt, {
+      x: sim.pos.x, z: sim.pos.z, daylight, pxScale: sandCtx.pxPerUnit, dawn,
+      yaw: sim.yaw(), vx: sim.vel.x, vz: sim.vel.z, headOn: lampLevel() >= 2,
+    });
+    // A dust devil that crosses the rover shoves it round: a swirl plus a pull in,
+    // a little of it turned into yaw so the rover gets spun, not just slid.
+    if (air.push.lengthSq() > 0 && sim.wheels.some((w) => w.contact)) {
+      sim.vel.x += air.push.x * dt;
+      sim.vel.z += air.push.y * dt;
+      sim.angVel.y += air.push.length() * 0.04 * dt;
+    }
+    beams.update(dt, lampLevel() >= 2, 1 - daylight);
+  }
   if (PLANET === 'moon') {
     const fb = flashback.update(dt, sim.pos.x, sim.pos.z);
     if (fb && progress.finishFlashback()) {
@@ -1292,6 +1379,17 @@ function frame() {
       refreshChapter();
       refreshPlanets();
     }
+  }
+
+  // ---------- the job in hand ----------
+  if (commsQueue.length && t > commsUntil) showNextComms();
+  else if (!commsQueue.length && commsEl.classList.contains('show') && t > commsUntil) commsEl.classList.remove('show');
+  storyClock -= dt;
+  if (storyClock <= 0) {
+    storyClock = 0.3; // objectives read live state; four times a second is plenty
+    const lines = story.poll(storyCtx());
+    if (lines.length) { say(lines); refreshPlanets(); }
+    refreshChapter();
   }
 
   sand.update(dt, sandCtx);
@@ -1307,18 +1405,9 @@ function frame() {
     if (missionEvent) {
       flash(missionEvent.text);
       if (audio) { audio.beep(missionEvent.type === 'deliver' ? 1180 : 780); if (missionEvent.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
-      // A delivery can open the next chapter. `firstTime` keeps each announcement to
-      // one, since this runs again on every reload with the same modules banked.
-      if (missionEvent.type === 'deliver') {
-        refreshPlanets();
-        refreshChapter();
-        const done = missions.deliveredCount();
-        if (done >= 4 && progress.firstTime('verdantaOpen')) {
-          setTimeout(() => flash('ВЕРДАНТА ВІДКРИТА · меню → Налаштування → планета'), 2800);
-        } else if (done >= FLASHBACK_AT && progress.firstTime('moonOpen')) {
-          setTimeout(() => flash('АРХІВ РОЗБЛОКОВАНО · флешбек: Місяць'), 2800);
-        }
-      }
+      // Opening a planet is announced by control over the radio (see story.js), so
+      // all that is needed here is to let the buttons catch up.
+      if (missionEvent.type === 'deliver') refreshPlanets();
     }
     hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
 
@@ -1335,7 +1424,7 @@ function frame() {
   }
 
   if (audio) {
-    const contacts = W.filter((w) => w.sim.contact).length / 4;
+    const contacts = W.filter((w) => w.sim.contact).length / W.length;
     audio.update({ speed: sim.speed, throttle: sim.cmd.throttle, contact: contacts,
       boost: sim.cmd.boost, daylight });
     // Knock when a wheel slams into its bump stop.
@@ -1346,7 +1435,7 @@ function frame() {
     }
   }
 
-  hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год · ${sim.awd ? '4×4' : '4×2'}`;
+  hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год · ${SPEC.driveLabel[sim.awd ? 0 : 1]}`;
   drawCompass(
     sim.yaw(),
     route.map((p, i) => ({
@@ -1356,7 +1445,10 @@ function frame() {
     }))
   );
   if (!map3dEl.classList.contains('hidden')) minimap.update(sim, dt);
-  renderer.render(scene, camera);
+  sunShadows.update();
+  if ((tagClock += dt) > 0.5) { tagClock = 0; tagLayers(scene); }
+  post.update(daylight);
+  post.render();
 
   const now = performance.now();
   const rawMs = now - dbgLast;
@@ -1372,13 +1464,29 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
+// Built last, once everything that lives in the scene has been added, so the
+// cascaded sun can patch every lit material up front (see sunshadow.js).
+const sunShadows = createSunShadows(scene, camera, sun, { far: 900 });
+const post = createPost(renderer, scene, camera);
+tagLayers(scene);
+let tagClock = 0;
+post.setSize(window.innerWidth, window.innerHeight);
+const btnPost = document.getElementById('postToggle');
+btnPost.addEventListener('click', () => {
+  post.setEnabled(!post.enabled);
+  btnPost.textContent = `Постобробка: ${post.enabled ? 'увімк' : 'вимк'}`;
+  btnPost.classList.toggle('on', post.enabled);
+});
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  post.setSize(window.innerWidth, window.innerHeight);
+  sunShadows.setSize();
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLOW } from './glow.js';
 import { ROUTE_PTS, surfaceHeight } from './terrain.js';
 import { PLANET } from './planet.js';
 
@@ -74,7 +75,7 @@ export function createFlashback() {
   function update(dt, x, z) {
     t += dt;
     const pulse = 0.55 + 0.45 * Math.sin(t * 2.6);
-    beacon.material.color.setRGB(1, 0.26 + 0.2 * pulse, 0.12 + 0.12 * pulse);
+    beacon.material.color.setRGB(1, 0.26 + 0.2 * pulse, 0.12 + 0.12 * pulse).multiplyScalar(GLOW);
     beaconLight.intensity = 4 + 7 * pulse;
     if (arrived) return null;
     if (Math.hypot(x - site.x, z - site.z) < ARRIVE_R) {

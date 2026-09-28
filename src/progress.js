@@ -16,7 +16,8 @@ const SKIP_MENU = 'rover.skipMenu'; // survives the reload a new game needs
 export const FLASHBACK_AT = 2; // modules delivered before the Moon opens
 export const FLASHBACK_REWARD = 12; // мотлох for finishing it
 
-const FRESH = () => ({ started: false, flashbackDone: false, bonusScrap: 0, seen: {} });
+// `briefed` starts behind `step` so the very first briefing still plays.
+const FRESH = () => ({ started: false, flashbackDone: false, bonusScrap: 0, seen: {}, step: 0, briefed: -1 });
 
 function load() {
   try {
@@ -34,6 +35,12 @@ function save() {
 
 export const progress = {
   get started() { return state.started; },
+  // Where the radio chain has got to (see story.js), and how much of it has been read
+  // out loud — kept apart so a reload does not replay a briefing you already heard.
+  get step() { return state.step; },
+  set step(v) { state.step = v; save(); },
+  get briefed() { return state.briefed; },
+  set briefed(v) { state.briefed = v; save(); },
   get flashbackDone() { return state.flashbackDone; },
   get bonusScrap() { return state.bonusScrap; },
 

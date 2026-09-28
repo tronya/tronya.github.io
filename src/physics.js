@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { groundHeight } from './terrain.js';
-import { WHEEL_R, WHEEL_X, AXLE_Z, SUSP, ackermann } from './vehicle.js';
+import { WHEEL_R, SUSP } from './vehicle.js';
+import { SPEC, WHEEL_DEFS, AXLE_PAIRS, steerAngle } from './chassis.js';
 import { PLANET } from './planet.js';
 
 export { PLANET };
@@ -13,13 +14,17 @@ export { PLANET };
 // K_PROG) computed once at load — a live in-game planet swap would need those
 // re-derived every frame instead, which is why the menu reloads the page.
 export const GRAVITY = PLANET === 'moon' ? 1.62 : PLANET === 'verdanta' ? 9.5 : 3.71;
-const MASS = 4200; // a heavy, armoured rover
+// Mass, wheel layout and suspension rates come from the chosen chassis (see
+// chassis.js): the four-wheel scout or the six-wheel crawler. Everything below is
+// derived from those numbers, never from a hard-coded wheel count.
+const MASS = SPEC.mass;
+const NW = WHEEL_DEFS.length;
 const WEIGHT = MASS * GRAVITY;
-const CORNER = WEIGHT / 4; // static load on one wheel
+const CORNER = WEIGHT / NW; // static load on one wheel
 // Low and central: the battery pack sits in the floor, which is what keeps a
 // tall-wheeled rover from tipping when it lands off a dune.
-const COM = new THREE.Vector3(0, -0.32, 0); // relative to the suspension mount plane
-const BOX = { w: 3.6, h: 2.0, l: 7.2 };
+const COM = new THREE.Vector3(0, SPEC.comY, 0); // relative to the suspension mount plane
+const BOX = SPEC.box;
 const INERTIA = {
   // Lower than the true box value (like yaw below) so the same accel/brake/corner
   // torque — already computed correctly from where those forces land relative to
@@ -37,7 +42,7 @@ const INERTIA = {
 // modest on purpose: the workshop's КОЛЕСА upgrade (sim.gripMul) is what lets a
 // maxed 540 kW motor actually put its power down instead of just lighting up the
 // tyres off the line.
-const MU = 1.3; // tyre grip on dust, stock — see gripMul
+const MU = SPEC.mu; // tyre grip on dust, stock — see gripMul
 // Stiff and well damped: on Mars gravity a soft spring wallows for seconds after
 // every bump. ~1.4 Hz with 40/65 % of critical damping settles the body at once.
 // That linear rate governs everyday ride (it's exactly what holds the static sag
@@ -46,10 +51,10 @@ const MU = 1.3; // tyre grip on dust, stock — see gripMul
 // hit meets progressively more resistance instead of the same rate all the way to
 // the bump stop, with zero effect on ride height or the tuned near-static feel.
 const S_STATIC = SUSP.Lfree - SUSP.Lstatic;
-const K_SPRING = (MASS * GRAVITY) / 4 / S_STATIC;
-const K_PROG = K_SPRING / 0.15;
-const C_BUMP = 4600 * (MASS / 2500);
-const C_REBOUND = 7200 * (MASS / 2500);
+const K_SPRING = (MASS * GRAVITY) / NW / S_STATIC;
+const K_PROG = K_SPRING / SPEC.progLen;
+const C_BUMP = 4600 * (MASS / 2500) * SPEC.damp.bump;
+const C_REBOUND = 7200 * (MASS / 2500) * SPEC.damp.rebound;
 const LDOT_MAX = 6; // damper blow-off, m/s — keeps a kerb strike from spiking the damper
 const K_ARB = 26000 * (MASS / 2500); // anti-roll bar, per axle
 
@@ -70,10 +75,11 @@ const UP_MIN = 0.5;
 const UP_FADE = 0.8;
 // Stock motor. The workshop's ДВИГУН upgrade scales this via sim.powerMul — 180,
 // 360 or 540 kW (see upgrades.js) — instead of this file hard-coding a fixed value.
-const F_DRIVE = 26000; // total, all four wheels, at the stock 180 kW
+const F_DRIVE = 26000; // total, all wheels, at the stock 180 kW
+const N_FRONT = WHEEL_DEFS.filter((w) => w.front).length;
 const POWER = 180000;
-const V_MAX = 12; // ~43 km/h cruising, AWD mode only
-const V_MAX_BOOST = 34; // Shift only, and it drinks the battery — stays above V_MAX_RWD
+const V_MAX = SPEC.vMax; // ~43 km/h cruising, AWD mode only
+const V_MAX_BOOST = SPEC.vMaxBoost; // Shift only, and it drinks the battery — stays above V_MAX_RWD
 const V_MAX_REVERSE = 6;
 // Below AWD_UP the front axle stays engaged for traction over rough ground; past it
 // the front hubs disengage and only the rear wheels drive — less drivetrain to spin
@@ -88,7 +94,7 @@ const MECH_STEER = 0.56; // mechanical lock at the knuckle
 // Time to wind the wheel from centre to full lock. Scaling the rate to the current
 // lock keeps that time the same at any speed; a fixed rad/s hit the (small) lock at
 // speed in a fifth of a second, so a tap was full opposite lock.
-const STEER_LOCK_TIME = 0.95;
+const STEER_LOCK_TIME = SPEC.steerTime;
 const BRAKE_FORCE = 3.2 * CORNER; // per wheel
 // Regolith is soft: a rover that stops pulling slows down noticeably. The linear
 // term is rolling resistance, the quadratic one stands in for churning through dust.
@@ -101,20 +107,17 @@ const MAX_RADIUS = 20000;
 // Hull points that can touch the ground, matching the body shell: skid plate, flanks,
 // deck and roof. These must track the visual hull or the truck collides with nothing.
 const BODY_POINTS = [];
-for (const x of [-1.2, 0, 1.2]) for (const z of [-3.3, -1.1, 1.1, 3.3]) BODY_POINTS.push(new THREE.Vector3(x, -0.5, z));
-for (const y of [0.35, 0.85]) {
-  for (const x of [-1.55, 0, 1.55]) for (const z of [-3.6, -1.8, 0, 1.8, 3.7]) BODY_POINTS.push(new THREE.Vector3(x, y, z));
+for (const grid of SPEC.hullGrids) {
+  for (const x of grid.xs) for (const y of grid.ys) for (const z of grid.zs) {
+    BODY_POINTS.push(new THREE.Vector3(x, y, z));
+  }
 }
-for (const x of [-1.35, 0, 1.35]) for (const z of [-3.2, -1.5, 0.5, 2.0]) BODY_POINTS.push(new THREE.Vector3(x, 1.38, z));
-// The sill along each flank. Without it the only side points sit above the centre of
-// mass, so a truck on its flank had nothing under its low centre of gravity and tipped
-// straight back over onto its wheels or its roof instead of lying there.
-for (const x of [-1.55, 1.55]) for (const z of [-3.4, -1.7, 0, 1.7, 3.4]) BODY_POINTS.push(new THREE.Vector3(x, -0.45, z));
-// The outer faces of the tyres. Lying on its side the truck rests on its four wheels,
-// which stand well proud of the flank, and that base is wide enough to hold the low
-// centre of mass. The points stay above the tread even at full bump, so they never
-// touch the ground while driving.
-for (const x of [-2.0, 2.0]) for (const z of [AXLE_Z.front, AXLE_Z.rear]) for (const dy of [-0.55, 0, 0.55]) {
+// The outer faces of the tyres. Lying on its side the rover rests on them, and they
+// stand well proud of the flank, so that base is wide enough to hold the low centre of
+// mass — without it a truck on its flank tipped straight back onto its wheels or its
+// roof instead of lying there. The points stay above the tread even at full bump, so
+// they never touch the ground while driving.
+for (const x of [-SPEC.tyreFaceX, SPEC.tyreFaceX]) for (const z of SPEC.axleZ) for (const dy of [-0.55, 0, 0.55]) {
   BODY_POINTS.push(new THREE.Vector3(x, -SUSP.Lstatic + dy, z));
 }
 const F_SUSP_MAX = 9 * CORNER; // a wheel can never push harder than ~9x its static load
@@ -134,23 +137,26 @@ const FOOT_DROP = FOOTPRINT.map((d) => WHEEL_R - Math.sqrt(WHEEL_R * WHEEL_R - d
 // A tyre can mount a step about half its radius. Anything taller is a wall you stop
 // against, not a ramp: without this the suspension "climbs" boulders vertically and
 // throws the truck into the air.
-const CLIMB_MAX = 0.65 * WHEEL_R;
+const CLIMB_MAX = SPEC.climb * WHEEL_R;
 const K_BLOCK = 8 * WEIGHT;
 const C_BLOCK = 0.6 * WEIGHT;
 const F_BLOCK_MAX = 1.7 * WEIGHT;
 
 // Highest ground under the tyre footprint, so a wheel rolls over a stone instead of
 // sinking into it. `blocked` is how far that reading exceeds what the tyre can climb.
-const contact = { g: 0, blocked: 0 };
+// `side` says which way along the heading the obstacle lies (+1 ahead, -1 behind).
+const contact = { g: 0, blocked: 0, side: 0 };
 function contactHeight(x, z, fx, fz) {
   const base = groundHeight(x, z);
   let best = base;
+  let side = 0;
   for (let i = 0; i < FOOTPRINT.length; i++) {
     const d = FOOTPRINT[i];
     if (d === 0) continue;
     const v = groundHeight(x + fx * d, z + fz * d) - FOOT_DROP[i];
-    if (v > best) best = v;
+    if (v > best) { best = v; side = Math.sign(d); }
   }
+  contact.side = side;
   const cap = base + CLIMB_MAX;
   contact.blocked = Math.max(0, best - cap);
   contact.g = Math.min(best, cap);
@@ -180,7 +186,7 @@ const force = V3(), torque = V3(), grad = { x: 0, z: 0 };
 const nrm = V3(), dir = V3(), fw = V3(), lw = V3(), f0 = V3();
 const wb = V3(), tb = V3(), iw = V3(), gyro = V3(), blk = V3();
 const rxn = V3(), tmpI = V3();
-const hullContacts = Array.from({ length: 96 }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0 }));
+const hullContacts = Array.from({ length: BODY_POINTS.length }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0 }));
 // World-space inverse inertia applied to a vector: out = R diag(1/I) R^T v.
 function invInertia(v, out, q) {
   out.copy(v).applyQuaternion(qInvScratch.copy(q).invert());
@@ -204,14 +210,9 @@ export class VehicleSim {
     this.powerMul = 1; // set by the workshop motor upgrade — not touched by reset()
     this.suspMul = 1; // set by the workshop suspension upgrade — how hard a hit it absorbs
     this.gripMul = 1; // set by the workshop wheels upgrade — tyre grip on top of MU
-    this.wheels = [
-      { name: 'FL', s: 1, z: AXLE_Z.front, front: true },
-      { name: 'FR', s: -1, z: AXLE_Z.front, front: true },
-      { name: 'RL', s: 1, z: AXLE_Z.rear, front: false },
-      { name: 'RR', s: -1, z: AXLE_Z.rear, front: false },
-    ].map((w) => ({
-      ...w, x: w.s * WHEEL_X, L: SUSP.Lstatic, Lprev: SUSP.Lstatic, wasContact: false, contact: false, Fs: 0, comp: 0,
-      cx: 0, cz: 0, g: 0, gPrev: 0, blocked: 0, vx: 0, vy: 0, spinRate: 0, dir: V3(), n: V3(), rel: V3(),
+    this.wheels = WHEEL_DEFS.map((w) => ({
+      ...w, L: SUSP.Lstatic, Lprev: SUSP.Lstatic, wasContact: false, contact: false, Fs: 0, comp: 0,
+      cx: 0, cz: 0, g: 0, gPrev: 0, blocked: 0, blockSide: 0, vx: 0, vy: 0, spinRate: 0, dir: V3(), n: V3(), rel: V3(),
     }));
     this.reset(0, 0, 0.6);
   }
@@ -229,6 +230,7 @@ export class VehicleSim {
       w.gPrev = w.g;
       w.wasContact = false;
       w.blocked = 0;
+      w.blockSide = 0;
       w.L = SUSP.Lstatic;
       w.Lprev = SUSP.Lstatic;
       w.contact = false;
@@ -311,7 +313,7 @@ export class VehicleSim {
   driveForce(thr, speed) {
     const boost = this.cmd.boost;
     let vmax = thr > 0 ? (boost ? V_MAX_BOOST : this.awd ? V_MAX : V_MAX_RWD) : V_MAX_REVERSE;
-    const fmax = (boost ? F_DRIVE * 1.4 : F_DRIVE) * this.powerMul;
+    const fmax = (boost ? F_DRIVE * 1.4 : F_DRIVE) * SPEC.lowGear * this.powerMul;
     let f = Math.min(fmax, ((boost ? POWER * 1.4 : POWER) * this.powerMul) / Math.max(Math.abs(speed), 2));
     if (thr * speed >= 0) f *= 1 - smoothstep(0.8 * vmax, vmax, Math.abs(speed));
     return f * thr;
@@ -393,13 +395,14 @@ export class VehicleSim {
     fwd.set(0, 0, 1).applyQuaternion(q);
     force.set(0, -MASS * GRAVITY, 0);
     torque.set(0, 0, 0);
-    const steer = ackermann(cmd.steer);
     const speed = vel.dot(fwd);
     // Only forward speed disengages the front axle — reversing or crawling over
     // rough ground always keeps all four driven for traction.
-    if (this.awd && speed > AWD_UP) this.awd = false;
-    else if (!this.awd && speed < AWD_DOWN) this.awd = true;
-    const driven = this.awd ? 4 : 2;
+    if (SPEC.awdSplit) {
+      if (this.awd && speed > AWD_UP) this.awd = false;
+      else if (!this.awd && speed < AWD_DOWN) this.awd = true;
+    }
+    let driven = this.awd ? NW : NW - N_FRONT;
 
     // Pass 1: where is the ground under each wheel, how compressed is each spring.
     fh.set(fwd.x, 0, fwd.z);
@@ -419,6 +422,7 @@ export class VehicleSim {
       const cz = mount.z - up.z * w.L;
       let g = contactHeight(cx, cz, fh.x, fh.z);
       w.blocked = contact.blocked;
+      w.blockSide = contact.side;
       const climb = CLIMB_FLOOR + CLIMB_RATE * Math.hypot(vm.x, vm.z);
       g = Math.min(g, w.gPrev + climb * h);
       w.gPrev = g;
@@ -472,13 +476,21 @@ export class VehicleSim {
     }
 
     // Anti-roll bars couple the left and right wheel of each axle.
-    for (const [a, b] of [[0, 1], [2, 3]]) {
+    for (let k = 0; k < AXLE_PAIRS.length; k++) {
+      const [a, b] = AXLE_PAIRS[k];
       const l = wheels[a];
       const r = wheels[b];
-      if (!l.contact && !r.contact) continue;
-      const arb = K_ARB * (clamp(l.comp, -0.2, 0.5) - clamp(r.comp, -0.2, 0.5));
+      if ((!l.contact && !r.contact) || !SPEC.arb[k]) continue;
+      const arb = SPEC.arb[k] * K_ARB * (clamp(l.comp, -0.2, 0.5) - clamp(r.comp, -0.2, 0.5));
       if (l.contact) l.Fs += arb;
       if (r.contact) r.Fs -= arb;
+    }
+
+    // Locked diffs: the torque only goes to driven wheels that can use it.
+    if (SPEC.lockers) {
+      let n = 0;
+      for (const w of wheels) if (w.contact && (this.awd || !w.front)) n++;
+      driven = Math.max(1, n);
     }
 
     // Pass 2: suspension + tyre forces at each contact patch.
@@ -505,7 +517,10 @@ export class VehicleSim {
         this.pointVelocity(blk, vp);
         vp.y = 0;
         const vh = vp.length();
-        if (vh > 0.05) {
+        // Only the approach is resisted. Backing away from the rock used to be braked
+        // just as hard, so a rover nosed into a boulder crept out in reverse at 0.1 m/s.
+        const leaving = w.blockSide !== 0 && w.blockSide * vp.dot(fh) < 0;
+        if (vh > 0.05 && !leaving) {
           const Fb = Math.min(F_BLOCK_MAX, K_BLOCK * w.blocked + C_BLOCK * vh);
           tmpB.copy(vp).multiplyScalar(-Fb / vh);
           this.applyAt(tmpB, blk);
@@ -519,7 +534,7 @@ export class VehicleSim {
       this.applyAt(tmpB, w.rel);
 
       this.pointVelocity(w.rel, vp);
-      const angle = w.front ? (w.s > 0 ? steer.left : steer.right) : 0;
+      const angle = steerAngle(w, cmd.steer, speed);
       f0.copy(fwd).applyAxisAngle(up, angle);
       fw.copy(f0).addScaledVector(nrm, -f0.dot(nrm)).normalize();
       lw.crossVectors(nrm, fw);
@@ -533,7 +548,7 @@ export class VehicleSim {
       let Fx;
       if (cmd.parked) Fx = -grip * Math.tanh(vx / 0.05);
       else {
-        const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * N + (DRAG_V2 * vx * vx) / 4;
+        const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * N + (DRAG_V2 * vx * vx) / NW;
         const isDriven = this.awd || !w.front;
         const drive = isDriven ? this.driveForce(cmd.throttle, speed) / driven : 0;
         Fx = drive - resist * Math.tanh(vx / 0.4);

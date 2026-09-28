@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { lamp } from './glow.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // Rover-local space: origin on the ground plane, forward = +Z, left = +X.
@@ -17,7 +18,7 @@ const M = {
   gold: std(0xd9a93a, 1.0, 0.28),
   wheel: std(0xaeb2b7, 0.95, 0.38, { side: THREE.DoubleSide }),
   glass: std(0x080b12, 0.9, 0.08),
-  led: new THREE.MeshBasicMaterial({ color: 0x4fd0ff }),
+  led: new THREE.MeshBasicMaterial({ color: lamp(0x4fd0ff) }),
 };
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);

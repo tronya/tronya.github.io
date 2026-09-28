@@ -43,19 +43,57 @@ const smooth = (a, b, x) => {
 };
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
-// ---------- the route: a graded road shaped like the letter S ----------
+// ---------- the route ----------
 
-// A stretched, wandering S: a rough zigzag through control points, smoothed with a
-// Catmull-Rom spline and pushed about by low-frequency noise so it never looks like a
-// compass-drawn letter. It is ~10 km long while the bases sit ~5.5 km apart, so cutting
-// across is much shorter but crosses rough, rocky ground instead of the road.
+// A rough zigzag through control points, smoothed with a Catmull-Rom spline and pushed
+// about by low-frequency noise so it never looks compass-drawn. Roughly 10 km long
+// while the bases sit ~5.5 km apart, so cutting across is much shorter but crosses
+// rough, rocky ground instead of the road.
+//
+// One shape per planet. This used to be a single list, which meant the same S-shaped
+// road on all three worlds — you could fly to another planet and find the identical
+// ten kilometres of tarmac, which did more damage to the illusion than any palette.
+// Everything else follows from ROUTE_PTS on its own: base positions, the distance
+// field, the flattening along the road, where missions and scrap are laid out, even
+// the wreck site in the Moon flashback. Mars keeps its original numbers exactly, so
+// its world is unchanged.
 export const ROAD_HALF = 34; // half-width of the graded strip
 const WALL_START = 1650; // farther than this from the road, ridges close the world in
-const ROUTE_SCALE = 0.8; // tunes the overall length
-const ROUTE_CONTROL = [
-  [1650, -2900], [900, -3250], [-250, -3050], [-1150, -2450], [-1500, -1500], [-1100, -650],
-  [-200, -80], [700, 350], [1350, 1000], [1500, 1900], [900, 2650], [-100, 2950], [-1050, 2850], [-1750, 2400],
-];
+const ROUTES = {
+  // The original S: two long opposing curves.
+  mars: {
+    scale: 0.8,
+    wander: 300,
+    control: [
+      [1650, -2900], [900, -3250], [-250, -3050], [-1150, -2450], [-1500, -1500], [-1100, -650],
+      [-200, -80], [700, 350], [1350, 1000], [1500, 1900], [900, 2650], [-100, 2950], [-1050, 2850], [-1750, 2400],
+    ],
+  },
+  // A survey traverse threading a crater field: short legs and hard dog-legs rather
+  // than curves, and barely any wander — nothing up there erodes a road into a bend.
+  moon: {
+    scale: 0.85,
+    wander: 120,
+    control: [
+      [1500, -2750], [640, -2880], [880, -2050], [40, -1960], [300, -1180], [-560, -1240],
+      [-360, -380], [-1280, -300], [-1180, 560], [-320, 700], [-520, 1560], [360, 1500],
+      [220, 2340], [1060, 2260], [900, 2900],
+    ],
+  },
+  // A valley road: one long crescent that leans on the terrain instead of cutting
+  // across it, and wanders more, the way a road worn by water and use would.
+  verdanta: {
+    scale: 0.82,
+    wander: 420,
+    control: [
+      [-1500, -2950], [-400, -2800], [500, -2350], [1150, -1550], [1400, -600], [1250, 350],
+      [800, 1200], [100, 1850], [-750, 2300], [-1600, 2500], [-2100, 2950],
+    ],
+  },
+};
+const ROUTE = ROUTES[PLANET] || ROUTES.mars;
+const ROUTE_SCALE = ROUTE.scale; // tunes the overall length
+const ROUTE_CONTROL = ROUTE.control;
 
 export const ROUTE_PTS = (() => {
   const c = ROUTE_CONTROL.map(([x, z]) => [x * ROUTE_SCALE, z * ROUTE_SCALE]);
@@ -81,8 +119,8 @@ export const ROUTE_PTS = (() => {
   const last = pts.length - 1;
   pts.forEach((p, i) => {
     const fade = Math.min(1, Math.min(i, last - i) / 12);
-    p.x += (fbm(p.x * 0.0011 + 40, p.z * 0.0011 + 3, 2) - 0.5) * 300 * fade;
-    p.z += (fbm(p.x * 0.0011 - 20, p.z * 0.0011 + 70, 2) - 0.5) * 300 * fade;
+    p.x += (fbm(p.x * 0.0011 + 40, p.z * 0.0011 + 3, 2) - 0.5) * ROUTE.wander * fade;
+    p.z += (fbm(p.x * 0.0011 - 20, p.z * 0.0011 + 70, 2) - 0.5) * ROUTE.wander * fade;
   });
   let s = 0;
   pts[0].s = 0;
@@ -178,12 +216,19 @@ export function nearestRouteIndex(x, z) {
 }
 
 // Where to put the rover at a base and which way the road leaves it.
+// Measured in metres along the road, not in route points: point spacing follows the
+// control points, so counting two of them put the rover 48 m clear of the base on one
+// planet and 29 m on another — close enough for the chase camera to end up inside the
+// buildings.
+const SPAWN_CLEAR = 50;
 export function roadSpawn(atEnd) {
-  const from = atEnd ? ROUTE_PTS.length - 1 : 0;
+  const n = ROUTE_PTS.length;
+  let k = atEnd ? n - 1 : 0;
   const dir = atEnd ? -1 : 1;
-  const k = clamp(from + dir * 2, 0, ROUTE_PTS.length - 1);
-  const p = ROUTE_PTS[from + dir * 2];
-  const q = ROUTE_PTS[clamp(k + dir, 0, ROUTE_PTS.length - 1)];
+  const from = ROUTE_PTS[k].s;
+  while (k + dir >= 0 && k + dir < n && Math.abs(ROUTE_PTS[k].s - from) < SPAWN_CLEAR) k += dir;
+  const p = ROUTE_PTS[k];
+  const q = ROUTE_PTS[clamp(k + dir, 0, n - 1)];
   return { x: p.x, z: p.z, yaw: Math.atan2(q.x - p.x, q.z - p.z) };
 }
 
@@ -593,6 +638,119 @@ export function setViewScale(k) {
 export const MESH_STEP = 220 / 48; // TILE / SEG, the spacing of terrain vertices
 const TEX_METERS = 26; // one texture tile covers this many metres of ground
 
+// Close-up surface detail: a tileable height (R) + albedo (G) map, generated per
+// planet — pebbles and hairline cracks on Mars, micro-craters on the Moon, soil clumps
+// on Верданта. It is laid in world space under the rover and faded out by ~70 m, so it
+// adds relief where you actually look (next to the wheels) and never tiles visibly far off.
+function makeDetailTexture(anisotropy) {
+  const N = 512;
+  const H = new Float32Array(N * N);
+  const A = new Float32Array(N * N);
+  let seed = 90173;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const wrap = (v) => ((v % N) + N) % N;
+
+  // Tileable value noise: a lattice whose period divides N.
+  function vnoise(period, amp, albedo = 0) {
+    const g = new Float32Array(period * period);
+    for (let i = 0; i < g.length; i++) g[i] = rnd() - 0.5;
+    const cell = N / period;
+    for (let y = 0; y < N; y++) {
+      const fy = y / cell;
+      const y0 = Math.floor(fy);
+      let ty = fy - y0;
+      ty = ty * ty * (3 - 2 * ty);
+      const r0 = (y0 % period) * period;
+      const r1 = ((y0 + 1) % period) * period;
+      for (let x = 0; x < N; x++) {
+        const fx = x / cell;
+        const x0 = Math.floor(fx);
+        let tx = fx - x0;
+        tx = tx * tx * (3 - 2 * tx);
+        const c0 = x0 % period;
+        const c1 = (x0 + 1) % period;
+        const a = g[r0 + c0] + (g[r0 + c1] - g[r0 + c0]) * tx;
+        const b = g[r1 + c0] + (g[r1 + c1] - g[r1 + c0]) * tx;
+        const v = a + (b - a) * ty;
+        H[y * N + x] += amp * v;
+        A[y * N + x] += albedo * v;
+      }
+    }
+  }
+  // Round feature of radius r; fn(d in 0..~1.3) returns [dh, da].
+  function stamp(cx, cy, r, reach, fn) {
+    const R = Math.ceil(r * reach);
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const d = Math.hypot(dx, dy) / r;
+        if (d > reach) continue;
+        const [dh, da] = fn(d);
+        const i = wrap(cy + dy) * N + wrap(cx + dx);
+        H[i] += dh;
+        A[i] += da;
+      }
+    }
+  }
+  function crack(len, depth) {
+    let x = rnd() * N;
+    let y = rnd() * N;
+    let a = rnd() * Math.PI * 2;
+    for (let k = 0; k < len; k++) {
+      a += (rnd() - 0.5) * 0.7;
+      x += Math.cos(a);
+      y += Math.sin(a);
+      const i = wrap(Math.round(y)) * N + wrap(Math.round(x));
+      H[i] -= depth;
+      A[i] -= depth * 0.9;
+    }
+  }
+  const pebble = (h, shade) => (d) => (d < 1 ? [h * Math.sqrt(1 - d * d), shade * (1 - d * 0.5)] : [0, 0]);
+
+  vnoise(16, 0.35, 0.18);
+  vnoise(64, 0.18, 0.1);
+  vnoise(256, 0.08, 0.06);
+  if (PLANET === 'moon') {
+    for (let k = 0; k < 170; k++) {
+      const r = 3 + Math.pow(rnd(), 2.5) * 22;
+      const depth = 0.35 + rnd() * 0.3;
+      stamp(Math.floor(rnd() * N), Math.floor(rnd() * N), r, 1.35, (d) => {
+        if (d < 0.85) return [-depth * (1 - (d / 0.85) ** 2), -0.08];
+        const rim = 1 - Math.min(1, Math.abs(d - 1) / 0.3);
+        return [depth * 0.45 * rim, 0.1 * rim];
+      });
+    }
+    for (let k = 0; k < 500; k++) stamp(Math.floor(rnd() * N), Math.floor(rnd() * N), 1 + rnd() * 3, 1, pebble(0.3, (rnd() - 0.3) * 0.3));
+  } else if (PLANET === 'verdanta') {
+    for (let k = 0; k < 900; k++) stamp(Math.floor(rnd() * N), Math.floor(rnd() * N), 2 + rnd() * 8, 1, pebble(0.28, -0.12 - rnd() * 0.12));
+    for (let k = 0; k < 350; k++) stamp(Math.floor(rnd() * N), Math.floor(rnd() * N), 1 + rnd() * 3, 1, pebble(0.45, (rnd() - 0.4) * 0.35));
+  } else {
+    for (let k = 0; k < 70; k++) crack(30 + rnd() * 90, 0.28);
+    for (let k = 0; k < 1500; k++) {
+      const r = 1.2 + Math.pow(rnd(), 2) * 7;
+      stamp(Math.floor(rnd() * N), Math.floor(rnd() * N), r, 1, pebble(0.5 * Math.min(1, r / 4), (rnd() - 0.45) * 0.45));
+    }
+  }
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of H) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const px = new Uint8Array(N * N * 4);
+  for (let i = 0; i < N * N; i++) {
+    px[i * 4] = Math.round(((H[i] - lo) / (hi - lo)) * 255);
+    px[i * 4 + 1] = Math.max(0, Math.min(255, Math.round((0.5 + A[i]) * 255)));
+    px[i * 4 + 2] = 0;
+    px[i * 4 + 3] = 255;
+  }
+  const t = new THREE.DataTexture(px, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = anisotropy;
+  t.needsUpdate = true;
+  return t;
+}
+
 function makeGroundTexture(anisotropy) {
   const size = 512;
   const canvas = document.createElement('canvas');
@@ -825,10 +983,31 @@ export function createTerrain(anisotropy = 8) {
   // One texture repeating every few metres reads as an obvious grid from a distance.
   // Mixing a second sample at an incommensurate scale and offset pushes the combined
   // repeat period far beyond what the eye picks up.
+  const detail = makeDetailTexture(anisotropy);
+  const detailAmt = { value: 1 };
   mat.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <map_fragment>',
-      `#ifdef USE_MAP
+    shader.uniforms.tDetail = { value: detail };
+    shader.uniforms.detailAmt = detailAmt;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDetailPos;\nvarying vec3 vDetailN;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvDetailPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvDetailN = normalize( mat3( modelMatrix ) * objectNormal );');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vDetailPos;
+varying vec3 vDetailN;
+uniform sampler2D tDetail;
+uniform float detailAmt;
+// Triplanar: the same detail laid from above and from both sides, blended by which
+// way the ground faces — a flat top-down projection smeared into streaks on slopes.
+vec4 triDetail( vec3 p, vec3 w, float scale ) {
+  return texture2D( tDetail, p.xz / scale ) * w.y
+       + texture2D( tDetail, p.xy / scale + 0.31 ) * w.z
+       + texture2D( tDetail, p.zy / scale + 0.67 ) * w.x;
+}`)
+      .replace(
+        '#include <map_fragment>',
+        `vec2 detailDH = vec2( 0.0 );
+       #ifdef USE_MAP
          // Coarse layer carries the blotches and repeats only every ~26 m; the fine
          // layer is folded in as a brightness modulation so close-up grain stays
          // crisp. Averaging the two would just wash the contrast out to flat mud.
@@ -836,8 +1015,25 @@ export function createTerrain(anisotropy = 8) {
          float fine = texture2D( map, vMapUv * 8.37 + vec2( 0.21, 0.63 ) ).g;
          float grain = texture2D( map, vMapUv * 31.7 + vec2( 0.55, 0.11 ) ).r;
          diffuseColor.rgb *= coarse * ( 0.72 + 0.34 * fine ) * ( 0.88 + 0.16 * grain );
-       #endif`
-    );
+       #endif
+         // Close-up detail (makeDetailTexture): two rotated world-space scales so it
+         // never lines up into a grid, fading out by ~70 m.
+         float dNear = detailAmt * ( 1.0 - smoothstep( 30.0, 120.0, length( vViewPosition ) ) );
+         if ( dNear > 0.0 ) {
+           vec3 tw = pow( abs( normalize( vDetailN ) ), vec3( 4.0 ) );
+           tw /= ( tw.x + tw.y + tw.z );
+           vec4 d1 = triDetail( vDetailPos, tw, 5.0 );
+           vec4 d2 = triDetail( vDetailPos * mat3( 0.8, 0.0, -0.6, 0.0, 1.0, 0.0, 0.6, 0.0, 0.8 ) + 0.37, tw, 1.6 );
+           float h = d1.r * 0.6 + d2.r * 0.4;
+           float albedo = max( 0.1, ( 0.2 + 1.6 * d1.g ) * ( 0.62 + 0.76 * d2.g ) );
+           diffuseColor.rgb *= mix( 1.0, albedo, min( dNear, 1.0 ) );
+           detailDH = vec2( dFdx( h ), dFdy( h ) ) * 0.64 * dNear;
+         }`
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        THREE.ShaderChunk.normal_fragment_maps.replace('dHdxy_fwd()', '( dHdxy_fwd() + detailDH )')
+      );
   };
   const rockGeo = makeRockGeometry();
   const rockMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0, flatShading: true, vertexColors: true });
@@ -864,6 +1060,9 @@ export function createTerrain(anisotropy = 8) {
     for (let i = 0; i < GRID; i++) {
       const m = new THREE.Mesh(tileGeometry(SEG), mat);
       m.receiveShadow = true;
+      // Hills throw shadows now that the cascaded sun (sunshadow.js) reaches past the
+      // rover's own neighbourhood — long ones across the dunes at dawn and dusk.
+      m.castShadow = true;
       m.matrixAutoUpdate = false;
       group.add(m);
       const rocks = new THREE.InstancedMesh(rockGeo, rockMat, ROCKS_PER_TILE);
@@ -1022,5 +1221,5 @@ export function createTerrain(anisotropy = 8) {
     while (queue.length) update(x, z, 8);
   }
 
-  return { group, update, prime, TILE, GRID };
+  return { group, update, prime, TILE, GRID, detailAmt };
 }

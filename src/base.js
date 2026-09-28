@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { lamp } from './glow.js';
 import { terrainHeight } from './terrain.js';
 
 // A habitat at each end of the route: dome, landing pad, mast and a solar farm.
@@ -12,8 +13,8 @@ const M = {
   dark: std(0x1a1c21, 0.4, 0.5),
   pad: std(0x55524c, 0.1, 0.9),
   solar: std(0x16294a, 0.45, 0.28),
-  beacon: new THREE.MeshBasicMaterial({ color: 0x4fe0ff }),
-  stripe: new THREE.MeshBasicMaterial({ color: 0xff9420 }),
+  beacon: new THREE.MeshBasicMaterial({ color: lamp(0x4fe0ff) }),
+  stripe: new THREE.MeshBasicMaterial({ color: lamp(0xff9420, 3) }),
 };
 
 // A SpriteMaterial with no map draws a hard square, so the beacon needs a soft disc.
