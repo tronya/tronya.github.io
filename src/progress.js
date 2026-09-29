@@ -29,6 +29,12 @@ function load() {
 
 const state = load();
 
+// Test switch: localStorage['rover.unlockAll'] = '1' opens every planet regardless
+// of the campaign. Not reachable from the UI and never set by the game itself.
+const UNLOCK_ALL = (() => {
+  try { return localStorage.getItem('rover.unlockAll') === '1'; } catch (e) { return false; }
+})();
+
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* storage may be blocked */ }
 }
@@ -48,7 +54,7 @@ export const progress = {
   // earned, and both gates read the mission count rather than a flag of their own so
   // they can never drift out of step with what you have actually done.
   unlocked(planet, delivered) {
-    if (planet === 'mars') return true;
+    if (planet === 'mars' || UNLOCK_ALL) return true;
     if (planet === 'moon') return delivered >= FLASHBACK_AT;
     if (planet === 'verdanta') return delivered >= 4;
     return false;

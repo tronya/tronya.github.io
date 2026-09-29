@@ -441,7 +441,7 @@ function setLamps(level) {
     g.material.opacity = heads ? 1 : 0.4;
   }
   cabLight.visible = heads;
-  cabLight.intensity = heads ? 25 : 0;
+  cabLight.intensity = heads ? 25 * (MOUNT.cab.k ?? 1) : 0;
   // The long-range roof beam is a workshop unlock — no lamp mode lights it up until
   // ДАЛЬНЄ СВІТЛО is bought, whatever else is on.
   const far = heads && upgrades.unlocked('farlight');

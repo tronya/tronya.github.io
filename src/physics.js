@@ -100,6 +100,8 @@ const BRAKE_FORCE = 3.2 * CORNER; // per wheel
 // term is rolling resistance, the quadratic one stands in for churning through dust.
 const ROLLING_RES = 0.17;
 const DRAG_V2 = 22 * (SPEC.drag ?? 1); // N per (m/s)^2 — less for a low, light body
+const DOWNFORCE = SPEC.downforce ?? 0; // N per (m/s)^2
+const DOWNFORCE_MAX = 1.6 * MASS * GRAVITY;
 const SUBSTEP = 1 / 240;
 // The corridor ridges are the map boundary now; this is just a last-ditch backstop.
 const MAX_RADIUS = 20000;
@@ -396,6 +398,13 @@ export class VehicleSim {
     force.set(0, -MASS * GRAVITY, 0);
     torque.set(0, 0, 0);
     const speed = vel.dot(fwd);
+    // Aero downforce (the speedster only): grows with the square of speed and presses
+    // along the body's own down, so the tyres get more load — and so more grip — the
+    // faster it goes, the way a racing car's wings pin it to the track. Off once it is
+    // rolled past its side, so a flipped car is not glued onto its roof.
+    if (DOWNFORCE && up.y > 0.3) {
+      force.addScaledVector(up, -Math.min(DOWNFORCE * speed * speed, DOWNFORCE_MAX));
+    }
     // Only forward speed disengages the front axle — reversing or crawling over
     // rough ground always keeps all four driven for traction.
     if (SPEC.awdSplit) {
@@ -412,7 +421,7 @@ export class VehicleSim {
     for (const w of wheels) {
       w.contact = false;
       w.Fs = 0;
-      rel.set(w.x, 0, w.z).sub(COM).applyQuaternion(q);
+      rel.set(w.x, w.my, w.z).sub(COM).applyQuaternion(q);
       mount.copy(pos).add(rel);
       this.pointVelocity(rel, vm);
 
@@ -437,7 +446,7 @@ export class VehicleSim {
         w.wasContact = false;
         continue;
       }
-      const Lreq = (mount.y - (g + WHEEL_R)) / up.y;
+      const Lreq = (mount.y - (g + w.R)) / up.y;
       w.L = clamp(Lreq, SUSP.Lmin - PEN_MAX * this.suspMul, SUSP.Lmax);
       if (Lreq >= SUSP.Lmax) {
         w.Lprev = w.L;
@@ -502,7 +511,7 @@ export class VehicleSim {
         // classic off-road look. It was snapping toward a stop every jump before,
         // which read as an unwanted ABS/traction-control mid-air.
         if (cmd.throttle !== 0) {
-          const freeMax = (V_MAX_BOOST * 1.5) / WHEEL_R;
+          const freeMax = (V_MAX_BOOST * 1.5) / w.R;
           w.spinRate = clamp(w.spinRate + Math.sign(cmd.throttle) * freeMax * 5 * h, -freeMax, freeMax);
         } else {
           w.spinRate *= 0.9995;
@@ -544,7 +553,7 @@ export class VehicleSim {
       w.vy = vy;
 
       const N = Fs;
-      const grip = MU * this.gripMul * N;
+      const grip = MU * w.mu * this.gripMul * N;
       let Fx;
       if (cmd.parked) Fx = -grip * Math.tanh(vx / 0.05);
       else {
@@ -566,7 +575,7 @@ export class VehicleSim {
       }
       tmpB.copy(fw).multiplyScalar(Fx).addScaledVector(lw, Fy);
       this.applyAt(tmpB, w.rel);
-      w.spinRate = vx / WHEEL_R;
+      w.spinRate = vx / w.R;
     }
 
     // Soft wall at the edge of the map.

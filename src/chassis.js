@@ -177,24 +177,26 @@ const SPECS = {
     hullW: 2.4,
     axleZ: [2.4, -2.5],
     turnZ: -2.5,
-    susp: { Lmin: 0.12, Lmax: 1.0, Lfree: 1.0, Lstatic: 0.6 },
-    steerTime: 0.4,
-    progLen: 0.35,
-    damp: { bump: 0.35, rebound: 0.5 },
-    mass: 2600,
+    // The crawler's long-travel soft corners: a bump is soaked up by the wheel
+    // instead of throwing the light body about — it was a pogo stick on stiff ones.
+    susp: { Lmin: 0.1, Lmax: 1.08, Lfree: 1.12, Lstatic: 0.62 },
+    steerTime: 0.5,
+    progLen: 0.5,
+    damp: { bump: 0.1, rebound: 0.22 },
+    mass: 3000,
     box: { w: 3.0, h: 1.6, l: 6.8 },
-    comY: -0.6,
+    comY: -0.8, // pack slung low in the belly
     mu: 1.4,
-    vMax: 14,
-    vMaxRwd: 30,
-    vMaxBoost: 36,
-    power: 1.2,
+    vMax: 13,
+    vMaxRwd: 24,
+    vMaxBoost: 30,
+    power: 1.1,
     drag: 0.7,
-    awdSplit: true,
-    lockers: false,
-    lowGear: 1.2,
-    arb: [1.2, 1.2],
-    climb: 0.75,
+    awdSplit: false, // permanent 4×4
+    lockers: true,
+    lowGear: 1.4,
+    arb: [1, 1],
+    climb: 0.8,
     tyreFaceX: 2.79,
     hullGrids: [
       { xs: [-0.9, 0, 0.9], ys: [-0.35], zs: [-3, -1.5, 0, 1.5, 3] },
@@ -202,9 +204,9 @@ const SPECS = {
       { xs: [-0.8, 0.8], ys: [1.0], zs: [-2.5, -0.5, 1.0] },
     ],
     mounts: {
-      head: { x: 0.62, y: 0.14, z: 3.28, glowZ: 3.38, aimX: 0.45 },
-      far: { y: 1.12, z: 0.1 },
-      cab: { y: 0.85, z: 0.8 },
+      head: { x: 0.75, y: 0.2, z: 3.56, glowZ: 3.62, aimX: 0.5 },
+      far: { y: 1.46, z: -0.34 }, // roof bar on struts behind the canopy
+      cab: { y: 0.5, z: 1.45, k: 0.3 }, // dash glow, low and dim in a small cockpit
       marker: { x: 1.25, y: 0.2, z: 0 },
     },
   },
@@ -223,23 +225,31 @@ const SPECS = {
     turnZ: -2.45,
     susp: { Lmin: 0.12, Lmax: 0.62, Lfree: 0.56, Lstatic: 0.42 },
     steerTime: 0.35,
-    progLen: 0.2,
+    progLen: 0.12, // firms up hard, so the wings can't bottom it out
     damp: { bump: 0.8, rebound: 0.9 },
     mass: 1900,
     box: { w: 2.9, h: 1.3, l: 7.0 },
-    comY: -0.45,
-    mu: 1.4,
-    vMax: 16,
+    comY: -0.7,
+    mu: 1.6, // soft compound
+    vMax: 40, // always in 4×4 now, so this is the cruise ceiling
     vMaxRwd: 40,
     vMaxBoost: 48,
     power: 1.6,
+    // Aero: ~0.35 of its weight at 100 km/h, ~1.2 at 180, capped at 1.6.
+    downforce: 7,
     drag: 0.35,
-    awdSplit: true,
+    awdSplit: false, // permanent 4×4: rear-drive-only at speed kept spinning it out
     lockers: false,
     lowGear: 1,
     arb: [1.3, 1.1],
     climb: 0.6,
-    tyreFaceX: 2.39, // the scout's narrow tyres, not the balloons
+    // The nose is far below the scout's shock towers: drop the towers and the upper
+    // arms to the tub and brace them to it (brace.y follows the body's top line).
+    // F1-style rear: 15 % taller, 35 % wider tyres, track pushed out to match, and
+    // the extra rubber grips harder — the rear bites, so it understeers, not spins.
+    rear: { scale: 1.15, width: 1.35, dx: 0.27, mu: 1.2 },
+    corner: { topY: 0.22, upY: -0.06, brace: { x: 0.72, y: (z) => (z > 0 ? -0.08 : 0.12) } },
+    tyreFaceX: 2.42, // narrow round-crowned tyres, not the balloons
     hullGrids: [
       { xs: [-0.8, 0, 0.8], ys: [-0.95], zs: [-3, -1.5, 0, 1.5, 3.3] },
       { xs: [-1.3, 1.3], ys: [-0.3], zs: [-1.2, 0, 1.2] },
@@ -249,8 +259,8 @@ const SPECS = {
     ],
     mounts: {
       head: { x: 0.5, y: -0.5, z: 3.5, glowZ: 3.62, aimX: 0.4 },
-      far: { y: 1.05, z: 0.4 },
-      cab: { y: 0.7, z: 0.8 },
+      far: { y: 1.16, z: -0.2 }, // pod on the front of the spine
+      cab: { y: 0.1, z: 1.3, k: 0.3 },
       marker: { x: 1.3, y: -0.4, z: 0 },
     },
   },
@@ -262,16 +272,31 @@ export const CHASSIS_LIST = [SPECS.truck, SPECS.crawler, SPECS.hauler, SPECS.bug
 // One entry per wheel, the single source of truth for both the art and the sim —
 // they are matched by index in main.js, so the order must come from one place.
 // `dz` is the lever arm about the steering centre; 0 means the wheel never steers.
+// A chassis may run bigger, wider tyres on the rear axle (the speedster, like an
+// F1 car): `R` is each wheel's own radius, `wk` its extra width, `my` how much higher
+// its mount sits so the body still rides level, `mu` its grip factor.
+const R0 = 0.855 * SPEC.wheelScale;
+const REAR = SPEC.rear || {};
 export const WHEEL_DEFS = SPEC.axleZ.flatMap((z, axle) =>
-  [1, -1].map((s) => ({
-    name: `${SPEC.axleZ.length === 2 ? 'FR'[axle] : SPEC.axleZ.length === 3 ? 'FMR'[axle] : axle + 1}${s > 0 ? 'L' : 'R'}`,
-    s,
-    axle,
-    z,
-    x: s * SPEC.wheelX,
-    dz: z - SPEC.turnZ,
-    front: axle === 0,
-  }))
+  [1, -1].map((s) => {
+    const rear = axle === SPEC.axleZ.length - 1 && SPEC.rear;
+    const rs = rear ? REAR.scale : 1;
+    const x = s * (SPEC.wheelX + (rear ? REAR.dx : 0));
+    return {
+      name: `${SPEC.axleZ.length === 2 ? 'FR'[axle] : SPEC.axleZ.length === 3 ? 'FMR'[axle] : axle + 1}${s > 0 ? 'L' : 'R'}`,
+      s,
+      axle,
+      z,
+      x,
+      dz: z - SPEC.turnZ,
+      front: axle === 0,
+      R: R0 * rs,
+      my: R0 * rs - R0,
+      rs,
+      wk: rear ? REAR.width : 1,
+      mu: rear ? REAR.mu : 1,
+    };
+  })
 );
 
 // Left/right pairs of one axle, for the anti-roll bars.

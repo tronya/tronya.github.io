@@ -199,16 +199,20 @@ const SPRING_GEO = new THREE.TubeGeometry(new Helix(8, 0.085), 220, 0.028, 6, fa
 // low-pressure balloon tyres: nearly half again as wide, with a round shoulder
 // instead of the scout's squared-off one.
 const CRAWLER = CHASSIS !== 'truck' && CHASSIS !== 'speedster'; // the rest run fat tyres
+// The speedster's is a narrow tyre with a fully rounded crown, like a rally tyre.
+const SPEEDSTER = CHASSIS === 'speedster';
 const halfProfile = CRAWLER
   ? [[0.36, 0.5], [0.52, 0.53], [0.64, 0.52], [0.74, 0.47], [0.805, 0.38], [0.84, 0.26], [0.855, 0.12], [0.858, 0]]
-  : [[0.34, 0.36], [0.56, 0.37], [0.73, 0.32], [0.815, 0.2], [0.835, 0]];
+  : SPEEDSTER
+    ? [[0.36, 0.37], [0.56, 0.39], [0.68, 0.375], [0.76, 0.34], [0.81, 0.28], [0.84, 0.2], [0.855, 0.1], [0.86, 0]]
+    : [[0.34, 0.36], [0.56, 0.37], [0.73, 0.32], [0.815, 0.2], [0.835, 0]];
 const RIM_FACE = CRAWLER ? 0.43 : 0.3; // how far out the rim faces sit
 export const TYRE_HALF_W = halfProfile[1][1] * WHEEL_SCALE;
 const tireGeo = new THREE.LatheGeometry(
   [...halfProfile.map(([r, a]) => [r, -a]), ...halfProfile.slice(0, -1).reverse().map(([r, a]) => [r, a])].map(
     ([r, a]) => new THREE.Vector2(r, a)
   ),
-  CRAWLER ? 56 : 40
+  CRAWLER || SPEEDSTER ? 56 : 40
 );
 const lugGeo = new THREE.BoxGeometry(0.3, 0.1, 0.26);
 const spokeGeo = new THREE.BoxGeometry(0.09, 0.42, 0.14);
@@ -247,6 +251,31 @@ function buildWheel() {
           edge.rotation.set(0, 0, -k * 1.0);
           edge.scale.set(0.6, 0.8, 0.7);
           pivot.add(edge);
+        }
+        parts.add(pivot);
+      }
+    } else if (SPEEDSTER) {
+      // Fine, dense tread that follows the round crown: a centre row and two rows
+      // tipped onto each shoulder, staggered — reads as a round tyre, not a cog.
+      const LUGS = 30;
+      const small = new THREE.BoxGeometry(0.13, 0.04, 0.11);
+      for (let i = 0; i < LUGS; i++) {
+        const pivot = new THREE.Group();
+        pivot.rotation.x = (i * Math.PI * 2) / LUGS;
+        const odd = i % 2 ? 1 : -1;
+        const c = new THREE.Mesh(small, M.tire);
+        c.position.set(odd * 0.06, 0.862, 0);
+        pivot.add(c);
+        for (const k of [-1, 1]) {
+          const sh = new THREE.Mesh(small, M.tire);
+          sh.position.set(k * 0.22, 0.83, odd * 0.03);
+          sh.rotation.z = -k * 0.45;
+          pivot.add(sh);
+          const ed = new THREE.Mesh(small, M.tire);
+          ed.position.set(k * 0.32, 0.77, -odd * 0.03);
+          ed.rotation.z = -k * 0.95;
+          ed.scale.set(0.8, 1, 0.9);
+          pivot.add(ed);
         }
         parts.add(pivot);
       }
@@ -332,9 +361,16 @@ function buildWheel() {
 
 // ---------- suspension corner: wishbones, coil-over, drive shaft ----------
 
-function buildCorner(shell, root, s, z) {
+function buildCorner(shellAll, rootAll, s, z, wx = WHEEL_X, my = 0) {
   // Drawn for the scout's 1.75 m half-track; a wider track pushes the outboard ends.
-  const ox = WHEEL_X - 1.75;
+  const ox = wx - 1.75;
+  // A raised mount (a bigger rear wheel) lifts the whole corner by `my`.
+  const shell = new THREE.Group();
+  const root = new THREE.Group();
+  shell.position.y = my;
+  root.position.y = my;
+  shellAll.add(shell);
+  rootAll.add(root);
   const arms = Array.from({ length: 4 }, () => new THREE.Mesh(UNIT, M.metalDark));
   const spring = new THREE.Mesh(SPRING_GEO, M.spring);
   const damper = new THREE.Mesh(UNIT, M.black);
@@ -343,19 +379,25 @@ function buildCorner(shell, root, s, z) {
   const knuckle = box(0.14, 0.44, 0.24, M.metalDark, 0, 0, 0);
   root.add(...arms, spring, damper, piston, shaft, knuckle);
 
-  const top = V(s * (0.95 + ox), 0.55, z);
+  // A low body (the speedster) drops the shock tower and upper arms to meet it, and
+  // braces the tower back to the tub; everyone else keeps the scout's heights.
+  const CN = SPEC.corner || {};
+  const top = V(s * (0.95 + ox), CN.topY ?? 0.55, z);
   const bot = V(0, 0, 0);
   const pA = V(0, 0, 0);
   const pB = V(0, 0, 0);
   const diff = V(s * 0.3, -0.12, z);
   const lowIn = [V(s * 0.72, -0.34, z - 0.42), V(s * 0.72, -0.34, z + 0.42)];
-  const upIn = [V(s * 0.74, 0.16, z - 0.32), V(s * 0.74, 0.16, z + 0.32)];
+  const upIn = [V(s * 0.74, CN.upY ?? 0.16, z - 0.32), V(s * 0.74, CN.upY ?? 0.16, z + 0.32)];
   const lowOut = V(0, 0, 0);
   const upOut = V(0, 0, 0);
 
   // Mounts and the diff housing never move: they belong to the merged shell.
   for (const p of [...lowIn, ...upIn]) shell.add(box(0.13, 0.13, 0.15, M.armorDark, p.x, p.y, p.z));
   shell.add(box(0.2, 0.14, 0.2, M.armorDark, top.x, top.y, top.z));
+  if (CN.brace) {
+    for (const dz of [-0.38, 0.38]) shell.add(tube([top.x, top.y, z], [s * CN.brace.x, CN.brace.y(z), z + dz], 0.035, M.metalDark));
+  }
   shell.add(box(0.42, 0.3, 0.42, M.black, diff.x, diff.y, diff.z));
 
   return (L) => {
@@ -491,6 +533,40 @@ function buildArray(root, at) {
     // Leaves swing up and over the top: +z leaves turn negative about x, -z positive.
     for (const { hinge, d } of leaves) hinge.rotation.x = -d * (1 - e2) * Math.PI;
     base.rotation.x = e2 * 0.06; // a slight tilt to the sky once fully open
+  };
+}
+
+// The speedster's array lives under the floor: a stack of three panels on each
+// side, between the axles. Opening, each stack first slides out sideways from under
+// the sill like a drawer, rising as it clears the body, then the stack spreads —
+// the lower panels running out past the top one — into a wide strip either side.
+const DR_L = 2.5;
+const DR_W = 0.7;
+function buildDrawer(root, at) {
+  const geo = new THREE.BoxGeometry(DR_W, 0.03, DR_L);
+  const blades = [];
+  for (const s of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const g = new THREE.Group();
+      g.add(mesh(geo, M.solar, 0, 0, 0));
+      g.add(box(DR_W * 0.94, 0.03, 0.05, M.panelBack, 0, -0.025, DR_L * 0.47));
+      g.add(box(DR_W * 0.94, 0.03, 0.05, M.panelBack, 0, -0.025, -DR_L * 0.47));
+      g.add(box(0.04, 0.035, DR_L, M.orange, s * DR_W * 0.5, 0, 0)); // outer edge trim
+      root.add(g);
+      blades.push({ s, i, g });
+    }
+  }
+  const ease = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  return (t) => {
+    const out = ease(t / 0.45); // the whole stack slides out
+    const spread = ease((t - 0.4) / 0.6); // then fans apart sideways
+    for (const { s, i, g } of blades) {
+      const x = at.xIn + out * (at.xOut - at.xIn) + spread * i * (DR_W + 0.03);
+      const y = at.yIn - i * 0.035 + out * (at.yOut - at.yIn) + spread * i * 0.035;
+      g.position.set(s * x, y, at.z);
+      g.rotation.z = -s * 0.06 * spread; // tipped a touch outward, toward the sky
+      g.visible = t > 0.001 || i === 0; // stowed, only the bottom plate shows under the floor
+    }
   };
 }
 
@@ -1030,7 +1106,15 @@ function buggyBody(shell, root) {
   }
   shell.add(box(1.8, 0.04, 0.03, M.teal, 0, 0.3, 2.85));
   for (const s of [-1, 1]) {
-    shell.add(box(0.36, 0.12, 0.05, M.headlight, s * 0.62, 0.14, 3.3));
+    // Round lamp pods standing proud of the nose on short brackets, so you can see
+    // where the light comes from — flush strips just vanished into the copper.
+    for (const dx of [0, 0.34]) {
+      const x = s * (0.58 + dx);
+      shell.add(cyl(0.15, 0.13, 0.26, M.black, x, 0.2, 3.4, 'z'));
+      shell.add(cyl(0.12, 0.12, 0.03, M.headlight, x, 0.2, 3.53, 'z'));
+      shell.add(new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.018, 6, 20), M.metal).translateX(x).translateY(0.2).translateZ(3.54));
+    }
+    shell.add(box(0.5, 0.05, 0.2, M.metalDark, s * 0.75, 0.04, 3.36));
     shell.add(box(0.5, 0.1, 0.04, M.tail, s * 0.72, 0.62, -3.37));
   }
   // Exposed drivetrain under the tail: motor cans and a cross-member.
@@ -1047,6 +1131,13 @@ function buggyBody(shell, root) {
     pilot.position.z -= 0.25;
     shell.add(pilot);
   }
+
+  // Long-range light bar on two struts above the roof, behind the canopy — the
+  // beam used to come out of the cabin itself, from between the crew's helmets.
+  for (const s of [-1, 1]) shell.add(tube([s * 0.7, 1.02, -0.62], [s * 0.7, 1.4, -0.46], 0.03, M.metalDark));
+  shell.add(bar(1.7, 1.36, 1.54, 0.05, -0.56, -0.36, M.black, 0, 0.03));
+  shell.add(box(1.5, 0.08, 0.03, M.headlight, 0, 1.46, -0.35));
+  for (const s of [-1, 1]) shell.add(box(0.1, 0.08, 0.03, M.amber, s * 0.8, 1.46, -0.35));
 
   const setPanels = buildPanels(root, { x: 1.0, y: 1.1, z: -1.8 });
 
@@ -1109,15 +1200,20 @@ function speedsterBody(shell, root) {
   for (const s of [-1, 1]) shell.add(box(0.4, 0.5, 0.12, M.hullDark, s * 0.6, 0.05, -2.3));
   shell.add(box(1.8, 0.1, 0.12, M.black, 0, -0.6, -3.35));
 
-  // Pilot under the canopy.
+  // Long-range lamp pod on the nose of the spine, ahead of the solar pack.
+  shell.add(bar(0.56, 1.06, 1.26, 0.06, -0.42, -0.2, M.black, 0, 0.03));
+  shell.add(box(0.44, 0.08, 0.03, M.headlight, 0, 1.16, -0.19));
+
+  // Cockpit: dash with a screen.
   shell.add(box(1.0, 0.16, 0.3, M.black, 0, 0.18, 1.55));
   shell.add(box(0.2, 0.02, 0.14, M.screen, 0, 0.27, 1.52));
-  const pilot = buildPilot(0, M.suitOrange);
-  pilot.position.y -= 0.62;
-  pilot.position.z -= 0.2;
-  shell.add(pilot);
+  // No driver: the canopy is too low for a seated crew figure. An empty bucket
+  // seat and headrest read right through the glass instead.
+  shell.add(box(0.55, 0.12, 0.6, M.black, 0, -0.45, 0.55));
+  shell.add(box(0.55, 0.62, 0.12, M.black, 0, -0.12, 0.2));
+  shell.add(box(0.3, 0.2, 0.1, M.black, 0, 0.3, 0.18));
 
-  const setPanels = buildPanels(root, { x: 0.95, y: 0.62, z: -1.95 });
+  const setPanels = buildDrawer(root, { xIn: 0.42, xOut: 1.82, yIn: -0.99, yOut: -0.68, z: 0.05 });
 
   const yokePivot = new THREE.Group();
   yokePivot.position.set(0, 0.3, 1.25);
@@ -1137,10 +1233,11 @@ export function buildVehicle() {
 
   // Wheels + suspension, one corner per entry in the shared wheel table.
   const wheels = WHEEL_DEFS.map((d) => {
-    const setCorner = buildCorner(shell, root, d.s, d.z);
+    const setCorner = buildCorner(shell, root, d.s, d.z, Math.abs(d.x), d.my);
     const hub = new THREE.Group();
     const steer = new THREE.Group();
     const spin = buildWheel();
+    spin.scale.set(WHEEL_SCALE * d.rs * d.wk, WHEEL_SCALE * d.rs, WHEEL_SCALE * d.rs);
     steer.add(spin);
     hub.add(steer);
     root.add(hub);
@@ -1156,7 +1253,7 @@ export function buildVehicle() {
 
   function setSuspension(i, L) {
     const w = wheels[i];
-    w.hub.position.set(w.x, -L, w.z);
+    w.hub.position.set(w.x, w.my - L, w.z);
     w.setCorner(L);
   }
 
