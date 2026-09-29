@@ -4,8 +4,8 @@ import { terrainHeight, ROUTE_PTS, ROUTE_BOUNDS, BASES } from './terrain.js';
 import { PLANET } from './planet.js';
 
 // A small, real 3D relief of the whole crossing, built once from the same height
-// field the ground itself uses. Parked in the corner it just turns slowly on its
-// own, like a display model; a tap opens it into a big, orbitable dialog (drag to
+// field the ground itself uses. Parked in the corner it's a north-up close-up that
+// follows the rover; a tap opens it into a big, orbitable dialog (drag to
 // rotate, wheel to zoom) where tapping the ground — a tap, not a drag — drops a
 // waypoint there. Lit by a fixed lamp rather than the sol cycle, so it reads the
 // same whether it's day or night outside.
@@ -38,17 +38,6 @@ function elevColor(hi, out) {
   return out.copy(c0).lerp(c1, t);
 }
 
-// A flat arrow lying in the XZ plane, tip toward +Z — matches the game's own heading
-// convention (yaw 0 faces +Z), so `marker.rotation.y = yaw` alone points it correctly.
-function arrowGeometry(len, wid) {
-  const geo = new THREE.BufferGeometry();
-  const v = new Float32Array([0, 0, len, -wid, 0, -len * 0.6, wid, 0, -len * 0.6]);
-  geo.setAttribute('position', new THREE.BufferAttribute(v, 3));
-  geo.setIndex([0, 1, 2]);
-  geo.computeVertexNormals();
-  return geo;
-}
-
 // canvas: the WebGL view. overlay: a plain 2D canvas stacked exactly on top of it.
 export function createMinimap3D(canvas, overlay, missionModules = []) {
   const PAD = 240;
@@ -69,7 +58,10 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   const halfDiag = 0.5 * Math.hypot(spanX, spanZ);
   const orbitDist = (halfDiag / Math.tan(THREE.MathUtils.degToRad(FOV / 2))) * 1.2;
   const ORBIT_ELEV = THREE.MathUtils.degToRad(56);
-  const markerUnit = orbitDist * 0.07;
+  // Parked small, the map is a top-down close-up that follows the rover, north
+  // (+Z) up — so it agrees with the compass — rather than a turntable of the whole
+  // 10 km crossing, where the rover and every target were a pixel or two.
+  const SMALL_H = 1300;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(LOOK.bg);
@@ -115,35 +107,10 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   const roadGeo = new THREE.TubeGeometry(curve, 240, 3.4, 5, false);
   scene.add(new THREE.Mesh(roadGeo, new THREE.MeshBasicMaterial({ color: LOOK.road })));
 
-  for (const b of BASES) {
-    const m = new THREE.Mesh(
-      new THREE.ConeGeometry(markerUnit * 0.22, markerUnit * 0.6, 4),
-      new THREE.MeshBasicMaterial({ color: 0x4fe0ff })
-    );
-    m.position.set(b.x, terrainHeight(b.x, b.z) + markerUnit * 0.3, b.z);
-    m.rotation.y = Math.PI / 4;
-    scene.add(m);
-  }
-
-  // Mission modules: shown from the very start (no proximity reveal) so the player
-  // can plan their own route; each hides once picked up, same as its in-world crate.
-  // Гермес-3 is a Mars-only story, so no markers on the other, empty test worlds.
-  const moduleMarkers = (PLANET === 'mars' ? missionModules : []).map((m) => {
-    const mesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(markerUnit * 0.28),
-      new THREE.MeshBasicMaterial({ color: m.color })
-    );
-    mesh.position.set(m.x, terrainHeight(m.x, m.z) + markerUnit * 0.5, m.z);
-    scene.add(mesh);
-    return { mesh, m };
-  });
-
-  const roverMarker = new THREE.Mesh(
-    arrowGeometry(markerUnit * 0.5, markerUnit * 0.3),
-    new THREE.MeshBasicMaterial({ color: 0x7ce68f, side: THREE.DoubleSide })
-  );
-  roverMarker.position.y = markerUnit * 0.2;
-  scene.add(roverMarker);
+  // Bases, modules and the rover are drawn in plain 2D on the overlay (see
+  // drawOverlay) — a 3D marker sized for the whole-crossing view is a speck on the
+  // close-up and a boulder the other way round; a 2D icon is the same size in both.
+  const modules = PLANET === 'mars' ? missionModules : [];
 
   const sun = new THREE.DirectionalLight(LOOK.sun, 2.0);
   sun.position.set(-420, 720, 260);
@@ -153,7 +120,7 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   camera.position.set(
     center.x,
     orbitDist * Math.sin(ORBIT_ELEV),
-    center.z + orbitDist * Math.cos(ORBIT_ELEV)
+    center.z - orbitDist * Math.cos(ORBIT_ELEV)
   );
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -174,7 +141,6 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   controls.update();
 
   let big = false;
-  let turnAngle = 0;
   let route = [];
 
   // A tap either opens the dialog (parked small) or, inside it, drops a waypoint —
@@ -224,97 +190,186 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
     overlay.height = r.height * overlayDpr;
   }
 
-  // Waypoint badges: drawn in plain 2D on the overlay, one call a frame. A 3D sprite
-  // sized to look right needs recalibrating for the canvas' own pixel dimensions —
-  // get that a little wrong and it either hides or balloons across the screen. A 2D
-  // circle asked for at 15 px is 15 px, full stop, on the small panel or the big
-  // dialog alike.
-  const projTop = new THREE.Vector3();
-  const projGround = new THREE.Vector3();
-  function drawWaypoints() {
+  // Everything you steer by is drawn in plain 2D on the overlay, once a frame: a
+  // circle asked for at 13 px is 13 px on the small panel and the big dialog alike.
+  // Parked small, a target outside the view is pinned to the rim with an arrow
+  // pointing its way, so there's always something to head for.
+  const pr = new THREE.Vector3();
+  const fwd = new THREE.Vector3();
+  const toScreen = (x, y, z) => {
+    pr.set(x, y, z).project(camera);
+    return { x: ((pr.x + 1) / 2) * overlay.width, y: ((1 - pr.y) / 2) * overlay.height, behind: pr.z > 1 };
+  };
+  const fmtDist = (d) => (d < 1000 ? `${Math.round(d / 10) * 10} м` : `${(d / 1000).toFixed(d < 10000 ? 1 : 0)} км`);
+  const INK = 'rgba(13, 20, 26, 0.92)';
+
+  // Labels already placed this frame; a new one that would overlap steps down (or
+  // up) a line at a time until it's clear, so a cluster of targets in the same
+  // direction still reads as a list rather than one smear of digits.
+  let placed = [];
+  function label(text, x, y, align = 'left') {
+    const k = overlayDpr;
+    octx.font = `bold ${10.5 * k}px ui-monospace, monospace`;
+    const tw = octx.measureText(text).width;
+    const lh = 12 * k;
+    const x0 = align === 'left' ? x : align === 'right' ? x - tw : x - tw / 2;
+    const dir = y > overlay.height / 2 ? -1 : 1;
+    for (let i = 0; i < 6; i++) {
+      const yy = y + dir * i * lh;
+      if (!placed.some((r) => x0 < r.x1 + 5 * k && x0 + tw + 5 * k > r.x0 && Math.abs(yy - r.y) < lh)) {
+        y = yy;
+        break;
+      }
+      if (i === 5) return;
+    }
+    placed.push({ x0, x1: x0 + tw, y });
+    octx.textAlign = align;
+    octx.textBaseline = 'middle';
+    octx.lineWidth = 3 * k;
+    octx.strokeStyle = INK;
+    octx.strokeText(text, x, y);
+    octx.fillStyle = '#f4ead8';
+    octx.fillText(text, x, y);
+  }
+  function shape(kind, x, y, r, color, text) {
+    const k = overlayDpr;
+    octx.beginPath();
+    if (kind === 'diamond') {
+      octx.moveTo(x, y - r); octx.lineTo(x + r, y); octx.lineTo(x, y + r); octx.lineTo(x - r, y);
+      octx.closePath();
+    } else if (kind === 'square') {
+      octx.roundRect(x - r, y - r, r * 2, r * 2, 3 * k);
+    } else {
+      octx.arc(x, y, r, 0, Math.PI * 2);
+    }
+    octx.fillStyle = color;
+    octx.fill();
+    octx.lineWidth = 2 * k;
+    octx.strokeStyle = INK;
+    octx.stroke();
+    if (text) {
+      octx.fillStyle = '#0d1a22';
+      octx.font = `bold ${11 * k}px ui-monospace, monospace`;
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.fillText(text, x, y + k);
+    }
+  }
+
+  function drawTarget(t, rover) {
+    const k = overlayDpr;
+    const w = overlay.width;
+    const h = overlay.height;
+    const s = toScreen(t.x, terrainHeight(t.x, t.z), t.z);
+    const d = Math.hypot(t.x - rover.x, t.z - rover.z);
+    const r = t.r * k;
+    const m = 14 * k;
+    const inside = !s.behind && s.x > m && s.x < w - m && s.y > m && s.y < h - m;
+    if (inside) {
+      shape(t.kind, s.x, s.y, r, t.color, t.text);
+      label(fmtDist(d), s.x + r + 4 * k, s.y);
+      return;
+    }
+    if (big) return;
+    // Off the close-up: slide along the line from the centre until it meets the
+    // rim, then draw the icon there with a little arrow pointing on out.
+    const cx = w / 2;
+    const cy = h / 2;
+    let dx = s.x - cx;
+    let dy = s.y - cy;
+    const e = Math.min((cx - m - r) / Math.abs(dx || 1e-6), (cy - m - r) / Math.abs(dy || 1e-6));
+    const ex = cx + dx * e;
+    const ey = cy + dy * e;
+    const a = Math.atan2(dy, dx);
+    octx.save();
+    octx.translate(ex, ey);
+    octx.rotate(a);
+    octx.beginPath();
+    octx.moveTo(r + 9 * k, 0); octx.lineTo(r + 2 * k, -5 * k); octx.lineTo(r + 2 * k, 5 * k);
+    octx.closePath();
+    octx.fillStyle = t.color;
+    octx.fill();
+    octx.lineWidth = 1.5 * k;
+    octx.strokeStyle = INK;
+    octx.stroke();
+    octx.restore();
+    shape(t.kind, ex, ey, r * 0.85, t.color, t.text);
+    const right = ex < w / 2;
+    label(fmtDist(d), ex + (right ? 1 : -1) * (r + 5 * k), ey + (ey < h / 2 ? 1 : -1) * 11 * k, right ? 'left' : 'right');
+  }
+
+  function drawOverlay(sim) {
+    const k = overlayDpr;
     const w = overlay.width;
     const h = overlay.height;
     octx.clearRect(0, 0, w, h);
-    if (!route.length) return;
-    const R = 13 * overlayDpr;
-    octx.font = `bold ${12 * overlayDpr}px ui-monospace, monospace`;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'middle';
-    const toScreen = (v) => [((v.x + 1) / 2) * w, ((1 - v.y) / 2) * h];
-    route.forEach((p, i) => {
-      const groundY = terrainHeight(p.x, p.z);
-      // The badge floats a fixed height above its exact spot; projecting both ends
-      // and drawing the ground one as the needle's point is what makes it read as a
-      // pin actually stuck into that spot, not a coin just floating over the map.
-      projTop.set(p.x, groundY + markerUnit * 1.6, p.z).project(camera);
-      projGround.set(p.x, groundY, p.z).project(camera);
-      if (projTop.z > 1 || projTop.z < -1) return; // behind the camera
-      const [x, y] = toScreen(projTop);
-      const [gx, gy] = toScreen(projGround);
-      if (x < -R * 3 || x > w + R * 3 || y < -R * 3 || y > h + R * 3) return;
+    placed = [];
+    const rover = { x: sim.pos.x, z: sim.pos.z };
+    const ry = terrainHeight(rover.x, rover.z);
+    const rs = toScreen(rover.x, ry, rover.z);
 
-      const color = i === 0 ? '#7ce68f' : '#4fe0ff';
-      // Needle: tapers from a couple of pixels at the badge down to a sharp point
-      // exactly on the ground, so the tip — not the badge — marks the real spot.
-      const dx = gx - x;
-      const dy = gy - y;
-      const len = Math.hypot(dx, dy) || 1;
-      const perp = { x: (-dy / len) * 2 * overlayDpr, y: (dx / len) * 2 * overlayDpr };
+    // Planned route: a dashed line from the rover through every waypoint in order.
+    if (route.length) {
+      octx.setLineDash([6 * k, 5 * k]);
+      octx.lineWidth = 2 * k;
+      octx.strokeStyle = 'rgba(79, 224, 255, 0.85)';
       octx.beginPath();
-      octx.moveTo(x + perp.x, y + perp.y);
-      octx.lineTo(x - perp.x, y - perp.y);
-      octx.lineTo(gx, gy);
-      octx.closePath();
-      octx.fillStyle = color;
-      octx.fill();
-      octx.lineWidth = 1.4 * overlayDpr;
-      octx.strokeStyle = 'rgba(13, 26, 34, 0.9)';
+      octx.moveTo(rs.x, rs.y);
+      for (const p of route) {
+        const q = toScreen(p.x, terrainHeight(p.x, p.z), p.z);
+        octx.lineTo(q.x, q.y);
+      }
       octx.stroke();
-      // A little dark tick right at the ground point, so the exact spot reads even
-      // where the needle itself is foreshortened almost to nothing.
-      octx.beginPath();
-      octx.arc(gx, gy, 2.2 * overlayDpr, 0, Math.PI * 2);
-      octx.fillStyle = 'rgba(13, 26, 34, 0.9)';
-      octx.fill();
+      octx.setLineDash([]);
+    }
 
-      octx.beginPath();
-      octx.arc(x, y, R, 0, Math.PI * 2);
-      octx.fillStyle = color;
-      octx.fill();
-      octx.lineWidth = 2.2 * overlayDpr;
-      octx.strokeStyle = 'rgba(13, 26, 34, 0.9)';
-      octx.stroke();
-      octx.fillStyle = '#0d1a22';
-      octx.fillText(String(i + 1), x, y + overlayDpr);
-    });
+    const targets = [];
+    for (const b of BASES) targets.push({ ...b, kind: 'square', r: 8, color: '#4fe0ff', text: b.name[0] });
+    for (const m of modules) {
+      if (!m.collected) targets.push({ x: m.x, z: m.z, kind: 'diamond', r: 8, color: '#' + m.color.toString(16).padStart(6, '0') });
+    }
+    route.forEach((p, i) => targets.push({ x: p.x, z: p.z, kind: 'circle', r: 10, color: i === 0 ? '#7ce68f' : '#4fe0ff', text: String(i + 1) }));
+    for (const t of targets) t.d = Math.hypot(t.x - rover.x, t.z - rover.z);
+    targets.sort((a, b) => a.d - b.d);
+    for (const t of targets) drawTarget(t, rover);
+
+    // The rover: a fat arrowhead along its real heading on screen (projected, so
+    // it's right from any orbit angle too), dark-outlined to read over any ground.
+    fwd.set(0, 0, 1).applyQuaternion(sim.quat);
+    const ahead = toScreen(rover.x + fwd.x * 40, ry, rover.z + fwd.z * 40);
+    const a = Math.atan2(ahead.y - rs.y, ahead.x - rs.x);
+    octx.save();
+    octx.translate(rs.x, rs.y);
+    octx.rotate(a);
+    octx.beginPath();
+    octx.moveTo(12 * k, 0);
+    octx.lineTo(-8 * k, -8 * k);
+    octx.lineTo(-4 * k, 0);
+    octx.lineTo(-8 * k, 8 * k);
+    octx.closePath();
+    octx.fillStyle = '#ffe14f';
+    octx.fill();
+    octx.lineWidth = 2.2 * k;
+    octx.strokeStyle = INK;
+    octx.stroke();
+    octx.restore();
+
+    if (!big) {
+      // North tick, since the close-up is always north-up.
+      label('Пн ▲', w - 8 * k, 12 * k, 'right');
+    }
   }
 
-  // Parked small: turns like a display model on a turntable, camera position set
-  // directly at a fixed distance from the target — a true circular orbit, so every
-  // angle frames the crossing the same way. Opened big: an ordinary user-orbited
-  // camera, driven by OrbitControls.
   function update(sim, dt) {
     if (big) {
       controls.update();
     } else {
-      turnAngle += dt * 0.12;
-      const flat = orbitDist * Math.cos(ORBIT_ELEV);
-      camera.position.set(
-        center.x + Math.sin(turnAngle) * flat,
-        orbitDist * Math.sin(ORBIT_ELEV),
-        center.z + Math.cos(turnAngle) * flat
-      );
-      camera.lookAt(center);
-    }
-    const y = terrainHeight(sim.pos.x, sim.pos.z) + markerUnit * 0.2;
-    roverMarker.position.set(sim.pos.x, y, sim.pos.z);
-    roverMarker.rotation.y = sim.yaw();
-    for (const { mesh, m } of moduleMarkers) {
-      mesh.visible = !m.collected;
-      mesh.rotation.y += dt * 0.8;
+      camera.up.set(0, 0, 1);
+      camera.position.set(sim.pos.x, terrainHeight(sim.pos.x, sim.pos.z) + SMALL_H, sim.pos.z);
+      camera.lookAt(sim.pos.x, 0, sim.pos.z);
     }
     renderer.render(scene, camera);
-    drawWaypoints();
+    drawOverlay(sim);
   }
 
   return {
@@ -324,6 +379,13 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
     setBig(v) {
       big = v;
       controls.enabled = v;
+      if (v) {
+        // Back to the whole-crossing orbit, Y-up as OrbitControls expects.
+        camera.up.set(0, 1, 0);
+        camera.position.set(center.x, orbitDist * Math.sin(ORBIT_ELEV), center.z - orbitDist * Math.cos(ORBIT_ELEV));
+        controls.target.copy(center);
+        controls.update();
+      }
     },
     setOnAdd(fn) {
       onAdd = fn;

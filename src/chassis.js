@@ -7,10 +7,11 @@ const KEY = 'rover.chassis';
 function read() {
   try { return localStorage.getItem(KEY); } catch (e) { return null; } // storage may be blocked
 }
-export const CHASSIS = read() === 'crawler' ? 'crawler' : 'truck';
+const IDS = ['truck', 'crawler', 'hauler', 'buggy', 'speedster'];
+export const CHASSIS = IDS.includes(read()) ? read() : 'truck';
 
 export function setChassis(id) {
-  localStorage.setItem(KEY, id === 'crawler' ? 'crawler' : 'truck');
+  localStorage.setItem(KEY, IDS.includes(id) ? id : 'truck');
   location.reload();
 }
 
@@ -119,17 +120,151 @@ const SPECS = {
       marker: { x: 1.45, y: -0.2, z: 1.67 },
     },
   },
+  // АТЛАС-8: an eight-wheel armoured transporter. Two steered axles up front, two
+  // close-coupled ones at the back, a tall slab-sided hull sitting over the wheels
+  // and a forward cab with a big raked screen. The crawler's long-travel soft
+  // suspension and locked diffs, on bigger tyres under a heavier body.
+  hauler: {
+    id: 'hauler',
+    name: 'ТРАНСПОРТЕР 8×8',
+    tag: 'броньований транспортер · Атлас-8',
+    driveLabel: ['8×8', '8×8'],
+    wheelScale: 1.3,
+    wheelX: 2.15,
+    hullW: 3.9,
+    axleZ: [4.6, 2.1, -2.8, -5.3],
+    // Between the rear pair: both front axles steer (the second one less), the rear
+    // pair toe a little either way about their own midpoint, like a real 8×8.
+    turnZ: -4.05,
+    susp: { Lmin: 0.12, Lmax: 1.1, Lfree: 1.14, Lstatic: 0.64 },
+    steerTime: 0.55,
+    progLen: 0.5,
+    damp: { bump: 0.1, rebound: 0.22 },
+    mass: 9000,
+    box: { w: 4.0, h: 2.6, l: 12.6 },
+    comY: -0.85, // batteries and drivetrain in the tub, low between the wheels
+    mu: 1.5,
+    vMax: 10,
+    vMaxBoost: 22,
+    awdSplit: false,
+    lockers: true,
+    lowGear: 1.8,
+    arb: [1.6, 1, 1, 1.6],
+    climb: 0.8,
+    tyreFaceX: 2.84,
+    hullGrids: [
+      { xs: [-1.0, 0, 1.0], ys: [-0.58], zs: [-5.8, -3.5, -1.2, 1.2, 3.5, 5.7] },
+      { xs: [-1.95, 0, 1.95], ys: [1.0, 1.9], zs: [-6.2, -4.1, -2, 0, 2, 4.1, 5.9] },
+      { xs: [-1.5, 0, 1.5], ys: [2.8], zs: [-6.0, -2.0, 2.0, 4.2] },
+      { xs: [-1.2, 1.2], ys: [-0.5], zs: [-5.6, -2.8, 0, 2.8, 5.6] },
+    ],
+    mounts: {
+      head: { x: 1.25, y: 1.05, z: 6.02, glowZ: 6.12, aimX: 0.8 },
+      far: { y: 2.98, z: 4.1 },
+      cab: { y: 2.3, z: 3.6 },
+      marker: { x: 1.99, y: 1.2, z: 0.6 },
+    },
+  },
+  // КОЙОТ: a light buggy. Big tyres out on long arms, a narrow faceted copper body
+  // riding high between them, a glass canopy over the nose. Quick and bouncy.
+  buggy: {
+    id: 'buggy',
+    name: 'БАГІ 4×4',
+    tag: 'легкий баггі · Койот',
+    driveLabel: ['4×4', '4×2'],
+    wheelScale: 1.3,
+    wheelX: 2.1,
+    hullW: 2.4,
+    axleZ: [2.4, -2.5],
+    turnZ: -2.5,
+    susp: { Lmin: 0.12, Lmax: 1.0, Lfree: 1.0, Lstatic: 0.6 },
+    steerTime: 0.4,
+    progLen: 0.35,
+    damp: { bump: 0.35, rebound: 0.5 },
+    mass: 2600,
+    box: { w: 3.0, h: 1.6, l: 6.8 },
+    comY: -0.6,
+    mu: 1.4,
+    vMax: 14,
+    vMaxRwd: 30,
+    vMaxBoost: 36,
+    power: 1.2,
+    drag: 0.7,
+    awdSplit: true,
+    lockers: false,
+    lowGear: 1.2,
+    arb: [1.2, 1.2],
+    climb: 0.75,
+    tyreFaceX: 2.79,
+    hullGrids: [
+      { xs: [-0.9, 0, 0.9], ys: [-0.35], zs: [-3, -1.5, 0, 1.5, 3] },
+      { xs: [-1.25, 1.25], ys: [0.4], zs: [-3, -1.5, 0, 1.5, 3] },
+      { xs: [-0.8, 0.8], ys: [1.0], zs: [-2.5, -0.5, 1.0] },
+    ],
+    mounts: {
+      head: { x: 0.62, y: 0.14, z: 3.28, glowZ: 3.38, aimX: 0.45 },
+      far: { y: 1.12, z: 0.1 },
+      cab: { y: 0.85, z: 0.8 },
+      marker: { x: 1.25, y: 0.2, z: 0 },
+    },
+  },
+  // СТРІЛА: the fast one. Low, light, open-wheeled, a single-seat canopy, a hotter
+  // motor and a body that cuts through the dust — about half again the scout's top
+  // speed, on shorter, firmer suspension that wants smooth ground.
+  speedster: {
+    id: 'speedster',
+    name: 'СПІДСТЕР 4×4',
+    tag: 'швидкісний ровер · Стріла',
+    driveLabel: ['4×4', '4×2'],
+    wheelScale: 1.18,
+    wheelX: 1.95,
+    hullW: 2.3,
+    axleZ: [2.55, -2.45],
+    turnZ: -2.45,
+    susp: { Lmin: 0.12, Lmax: 0.62, Lfree: 0.56, Lstatic: 0.42 },
+    steerTime: 0.35,
+    progLen: 0.2,
+    damp: { bump: 0.8, rebound: 0.9 },
+    mass: 1900,
+    box: { w: 2.9, h: 1.3, l: 7.0 },
+    comY: -0.45,
+    mu: 1.4,
+    vMax: 16,
+    vMaxRwd: 40,
+    vMaxBoost: 48,
+    power: 1.6,
+    drag: 0.35,
+    awdSplit: true,
+    lockers: false,
+    lowGear: 1,
+    arb: [1.3, 1.1],
+    climb: 0.6,
+    tyreFaceX: 2.39, // the scout's narrow tyres, not the balloons
+    hullGrids: [
+      { xs: [-0.8, 0, 0.8], ys: [-0.95], zs: [-3, -1.5, 0, 1.5, 3.3] },
+      { xs: [-1.3, 1.3], ys: [-0.3], zs: [-1.2, 0, 1.2] },
+      { xs: [-0.9, 0.9], ys: [-0.4], zs: [-3.1, 3.2] },
+      { xs: [-0.5, 0.5], ys: [0.95], zs: [0, 1.0] },
+      { xs: [-1.1, 1.1], ys: [0.85], zs: [-3.3] },
+    ],
+    mounts: {
+      head: { x: 0.5, y: -0.5, z: 3.5, glowZ: 3.62, aimX: 0.4 },
+      far: { y: 1.05, z: 0.4 },
+      cab: { y: 0.7, z: 0.8 },
+      marker: { x: 1.3, y: -0.4, z: 0 },
+    },
+  },
 };
 
 export const SPEC = SPECS[CHASSIS];
-export const CHASSIS_LIST = [SPECS.truck, SPECS.crawler];
+export const CHASSIS_LIST = [SPECS.truck, SPECS.crawler, SPECS.hauler, SPECS.buggy, SPECS.speedster];
 
 // One entry per wheel, the single source of truth for both the art and the sim —
 // they are matched by index in main.js, so the order must come from one place.
 // `dz` is the lever arm about the steering centre; 0 means the wheel never steers.
 export const WHEEL_DEFS = SPEC.axleZ.flatMap((z, axle) =>
   [1, -1].map((s) => ({
-    name: `${'FMR'[SPEC.axleZ.length === 2 ? (axle ? 2 : 0) : axle]}${s > 0 ? 'L' : 'R'}`,
+    name: `${SPEC.axleZ.length === 2 ? 'FR'[axle] : SPEC.axleZ.length === 3 ? 'FMR'[axle] : axle + 1}${s > 0 ? 'L' : 'R'}`,
     s,
     axle,
     z,

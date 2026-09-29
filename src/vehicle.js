@@ -37,7 +37,23 @@ const M = {
   headlight: new THREE.MeshBasicMaterial({ color: lamp(0xd8c49a, 5) }),
   tail: new THREE.MeshBasicMaterial({ color: lamp(0x7e1a0b, 2) }),
   screen: new THREE.MeshBasicMaterial({ color: lamp(0xff8a2a, 2.5) }),
+  // АТЛАС-8 livery: pale armour over a black running gear, orange trim and rims.
+  hull: std(0xa9adb0, 0.3, 0.5),
+  hullLit: std(0xc4c7c9, 0.25, 0.48),
+  hullDark: std(0x1d1f23, 0.45, 0.55),
+  trim: std(0xd0761c, 0.35, 0.5),
+  hazard: std(0xe0b020, 0.2, 0.6),
 };
+// КОЙОТ: burnished copper. СТРІЛА: graphite over orange with lime accents.
+M.copper = std(0xb4643a, 0.6, 0.36);
+M.copperDark = std(0x6e3a22, 0.55, 0.45);
+M.graphite = std(0x55595f, 0.45, 0.42);
+M.orange = std(0xd8662a, 0.35, 0.45);
+M.lime = new THREE.MeshBasicMaterial({ color: lamp(0xb8f03a, 1.4) });
+M.glassDark = std(0x0c1218, 0.8, 0.06, { transparent: true, opacity: 0.78, depthWrite: false });
+M.teal = new THREE.MeshBasicMaterial({ color: lamp(0x3ad6b0, 1.6) });
+if (CHASSIS === 'hauler') M.rim.color.set(0xc9831c);
+if (CHASSIS === 'buggy' || CHASSIS === 'speedster') M.rim.color.set(0x17181c);
 function solarTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -66,7 +82,7 @@ M.solar = new THREE.MeshStandardMaterial({ map: solarTexture(), metalness: 0.45,
 M.panelBack = std(0x2a2d34, 0.5, 0.5);
 
 // Lamps and glazing never cast: they are unlit strips or transparent.
-const NO_CAST = new Set([M.amber, M.amberDim, M.headlight, M.tail, M.screen, M.glass]);
+const NO_CAST = new Set([M.amber, M.amberDim, M.headlight, M.tail, M.screen, M.glass, M.glassDark, M.lime, M.teal]);
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -182,7 +198,7 @@ const SPRING_GEO = new THREE.TubeGeometry(new Helix(8, 0.085), 220, 0.028, 6, fa
 // [radius, half-width] from the bead out to the tread centre. The crawler runs fat,
 // low-pressure balloon tyres: nearly half again as wide, with a round shoulder
 // instead of the scout's squared-off one.
-const CRAWLER = CHASSIS === 'crawler';
+const CRAWLER = CHASSIS !== 'truck' && CHASSIS !== 'speedster'; // the rest run fat tyres
 const halfProfile = CRAWLER
   ? [[0.36, 0.5], [0.52, 0.53], [0.64, 0.52], [0.74, 0.47], [0.805, 0.38], [0.84, 0.26], [0.855, 0.12], [0.858, 0]]
   : [[0.34, 0.36], [0.56, 0.37], [0.73, 0.32], [0.815, 0.2], [0.835, 0]];
@@ -271,6 +287,13 @@ function buildWheel() {
       const ring = new THREE.Mesh(rimRingGeo, M.rim);
       ring.rotation.y = Math.PI / 2;
       face.add(ring);
+      if (CHASSIS === 'speedster') {
+        // The racer's signature: a thin lime ring round the rim lip.
+        const lip = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.018, 6, 48), M.lime);
+        lip.rotation.y = Math.PI / 2;
+        lip.position.x = side * 0.085; // out on the sidewall, clear of the tyre
+        face.add(lip);
+      }
       face.add(mesh(new THREE.CircleGeometry(0.47, 28), M.armorDark, side * -0.03, 0, 0).rotateY((side * Math.PI) / 2));
       for (let i = 0; i < 10; i++) {
         const arm = new THREE.Group();
@@ -618,8 +641,8 @@ function rrect(w, yb, yt, rt, rb = rt, seg = 5) {
 // Skin a run of rounded sections (ascending z) into one smooth hull, capped flat at
 // both ends. This is what takes the crawler off the box: noses taper, roofs roll
 // over, edges catch a highlight instead of ending in a hard corner.
-function loft(list, mat) {
-  const S = list.map((q) => rrect(q.w, q.yb, q.yt, q.rt, q.rb ?? q.rt));
+function loft(list, mat, smooth = false) {
+  const S = list.map((q) => q.pts || rrect(q.w, q.yb, q.yt, q.rt, q.rb ?? q.rt));
   const n = S[0].length;
   const pos = [];
   list.forEach((q, k) => { for (const [x, y] of S[k]) pos.push(x, y, q.z); });
@@ -633,9 +656,13 @@ function loft(list, mat) {
       idx.push(a, b, c, b, d, c);
     }
   }
-  const skin = new THREE.BufferGeometry();
+  let skin = new THREE.BufferGeometry();
   skin.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   skin.setIndex(idx);
+  // Faceted (hex) sections shade flat, so every chamfer reads as a crisp plane;
+  // rounded ones keep smooth normals. `smooth` keeps a faceted shape soft-shaded —
+  // the speedster looks better with its planes melting into each other.
+  if (list[0].pts && !smooth) skin = skin.toNonIndexed();
   skin.computeVertexNormals();
 
   const cap = [];
@@ -660,6 +687,12 @@ function loft(list, mat) {
   g.add(new THREE.Mesh(skin, mat), new THREE.Mesh(caps, mat));
   return g;
 }
+
+// A faceted section: a hard-edged hexagon, widths at bottom / shoulder / top. Loft
+// these for slab-sided armour with chamfered edges instead of rolled ones.
+const hex = (wb, yb, wm, ym, wt, yt) => [
+  [wb / 2, yb], [wm / 2, ym], [wt / 2, yt], [-wt / 2, yt], [-wm / 2, ym], [-wb / 2, yb],
+];
 
 // A rounded bar of constant section between z0 and z1, ends eased in.
 const bar = (w, yb, yt, r, z0, z1, mat, x = 0, ease = 0.08) => {
@@ -830,12 +863,277 @@ function crawlerBody(shell, root) {
   return { yokePivot, setPanels, tailLamps: [V(1.0, 0.45, -4.68), V(-1.0, 0.45, -4.68)] };
 }
 
+// АТЛАС-8, the eight-wheel transporter: a tall, pale, slab-sided armour body with
+// chamfered edges, sitting over the wheels on a narrow black tub; a forward cab
+// with a big raked screen under an armour brow; the solar array on the long roof.
+function haulerBody(shell, root) {
+  // Running gear tub between the wheels — narrower up front, where both steered
+  // axles swing their tyres inboard.
+  shell.add(loft([
+    { z: -6.05, w: 2.1, yb: -0.3, yt: 0.95, rt: 0.12, rb: 0.2 },
+    { z: -5.8, w: 2.5, yb: -0.6, yt: 1.0, rt: 0.12, rb: 0.28 },
+    { z: 0.4, w: 2.5, yb: -0.6, yt: 1.0, rt: 0.12, rb: 0.28 },
+    { z: 1.2, w: 1.9, yb: -0.58, yt: 1.0, rt: 0.12, rb: 0.24 },
+    { z: 5.6, w: 1.9, yb: -0.5, yt: 1.0, rt: 0.12, rb: 0.24 },
+    { z: 5.95, w: 1.7, yb: -0.1, yt: 0.95, rt: 0.12, rb: 0.2 },
+  ], M.hullDark));
+  for (const s of [-1, 1]) shell.add(box(0.16, 0.26, 11.2, M.metalDark, s * 0.8, -0.5, -0.2));
+  for (const z of [-4.05, -0.4, 3.35]) shell.add(box(2.2, 0.12, 0.2, M.black, 0, -0.56, z));
+
+  // Main armour body, from the tail to the back of the cab.
+  shell.add(loft([
+    { z: -6.35, pts: hex(3.1, 1.12, 3.4, 1.8, 2.6, 2.28) },
+    { z: -6.1, pts: hex(3.75, 0.95, 3.95, 1.95, 3.2, 2.5) },
+    { z: 2.5, pts: hex(3.75, 0.95, 3.95, 1.95, 3.2, 2.5) },
+  ], M.hull));
+  // Upper deck plate a shade lighter, so the roof reads apart from the flanks.
+  shell.add(box(3.1, 0.04, 8.4, M.hullLit, 0, 2.51, -1.8));
+
+  // Cab: armour lower half, a glass canopy with a raked screen, an armour brow.
+  shell.add(loft([
+    { z: 2.4, pts: hex(3.75, 0.9, 3.95, 1.3, 3.85, 1.6) },
+    { z: 5.15, pts: hex(3.75, 0.9, 3.95, 1.3, 3.85, 1.6) },
+    { z: 5.85, pts: hex(3.3, 0.72, 3.5, 1.05, 3.4, 1.52) },
+    { z: 6.15, pts: hex(2.7, 0.8, 2.85, 1.0, 2.75, 1.36) },
+  ], M.hull));
+  shell.add(loft([
+    { z: 2.5, pts: hex(3.7, 1.55, 3.72, 2.2, 3.2, 2.66) },
+    { z: 4.0, pts: hex(3.7, 1.55, 3.72, 2.2, 3.2, 2.66) },
+    { z: 5.0, pts: hex(3.62, 1.55, 3.5, 2.0, 2.9, 2.24) },
+    { z: 5.8, pts: hex(3.34, 1.5, 3.24, 1.6, 2.7, 1.64) },
+  ], M.glass));
+  shell.add(loft([
+    { z: 2.4, pts: hex(3.3, 2.58, 3.7, 2.7, 3.0, 2.92) },
+    { z: 4.3, pts: hex(3.3, 2.58, 3.7, 2.7, 3.0, 2.92) },
+    { z: 4.8, pts: hex(2.9, 2.46, 3.2, 2.52, 2.5, 2.66) },
+  ], M.hullLit));
+  for (const s of [-1, 1]) {
+    // A-pillars and a door frame, so the canopy reads as a cab, not a bubble.
+    shell.add(bentTube([[s * 1.66, 1.56, 5.82], [s * 1.74, 2.12, 4.9], [s * 1.62, 2.64, 4.1]], 0.06, M.hullDark));
+    shell.add(tube([s * 1.86, 1.58, 3.3], [s * 1.84, 2.4, 3.3], 0.05, M.hullDark));
+    shell.add(tube([s * 1.86, 1.58, 2.5], [s * 1.84, 2.6, 2.5], 0.06, M.hullDark));
+    // Mirrors.
+    shell.add(bentTube([[s * 1.8, 1.9, 5.0], [s * 2.1, 2.0, 5.2], [s * 2.3, 2.0, 5.2]], 0.025, M.metalDark));
+    shell.add(bar(0.08, 1.8, 2.2, 0.03, 5.1, 5.34, M.black, s * 2.32, 0.02));
+  }
+  shell.add(tube([0, 1.58, 5.8], [0, 2.22, 4.95], 0.035, M.hullDark));
+
+  // Flanks: orange trim line, panel seams, hatches, amber markers.
+  for (const s of [-1, 1]) {
+    const x = s * 1.985;
+    shell.add(box(0.03, 0.07, 12.2, M.trim, x, 1.28, -0.1));
+    for (const z of [-4.4, -1.4, 1.2]) shell.add(box(0.02, 0.9, 0.03, M.black, x, 1.55, z));
+    shell.add(box(0.02, 0.03, 8.5, M.black, x, 1.92, -1.9));
+    shell.add(box(0.03, 0.55, 0.9, M.hullLit, x, 1.6, -2.9));
+    shell.add(box(0.035, 0.08, 0.35, M.hullDark, x, 1.6, -2.65));
+    for (const z of [-5.6, -2.0, 1.6]) shell.add(box(0.04, 0.08, 0.3, M.amber, x, 1.05, z));
+    // Side ladder and grab rail at the back.
+    shell.add(tube([s * 2.0, 1.1, -5.4], [s * 2.0, 2.5, -5.4], 0.03, M.metalDark));
+    shell.add(tube([s * 2.0, 1.1, -5.0], [s * 2.0, 2.5, -5.0], 0.03, M.metalDark));
+    for (let i = 0; i < 5; i++) shell.add(tube([s * 2.0, 1.2 + i * 0.3, -5.4], [s * 2.0, 1.2 + i * 0.3, -5.0], 0.02, M.metalDark));
+  }
+
+  // Roof: rails, equipment boxes, the cab light bar with amber pods, masts.
+  for (const s of [-1, 1]) shell.add(tube([s * 1.55, 2.62, 2.2], [s * 1.55, 2.62, -6.0], 0.035, M.metalDark));
+  shell.add(bar(1.1, 2.5, 2.95, 0.06, -6.0, -4.6, M.hullDark, 0.9, 0.04));
+  shell.add(bar(0.8, 2.5, 2.8, 0.06, -6.0, -5.0, M.hull, -0.9, 0.04));
+  shell.add(bar(2.6, 2.9, 3.06, 0.06, 4.0, 4.24, M.black, 0, 0.03));
+  shell.add(box(2.2, 0.06, 0.04, M.headlight, 0, 2.98, 4.26));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.22, 0.16, 0.18, M.black, s * 1.45, 3.0, 4.12));
+    shell.add(box(0.16, 0.1, 0.04, M.amber, s * 1.45, 3.0, 4.22));
+  }
+  shell.add(tube([-1.2, 2.92, 2.8], [-1.2, 3.9, 2.8], 0.02, M.metalDark));
+  shell.add(tube([1.2, 2.92, 2.6], [1.2, 3.6, 2.6], 0.025, M.metalDark));
+  shell.add(cyl(0.16, 0.16, 0.2, M.black, 1.2, 3.66, 2.6, 'x'));
+
+  // Nose: dark bumper with hazard chevrons, lamps set in the lower cab face, winch.
+  shell.add(loft([
+    { z: 5.6, w: 3.4, yb: 0.1, yt: 0.62, rt: 0.08 },
+    { z: 6.25, w: 3.4, yb: 0.1, yt: 0.62, rt: 0.08 },
+    { z: 6.4, w: 3.0, yb: 0.16, yt: 0.56, rt: 0.06 },
+  ], M.hullDark));
+  for (let i = 0; i < 6; i++) {
+    const x = -1.25 + i * 0.5;
+    const stripe = box(0.16, 0.36, 0.03, i % 2 ? M.black : M.hazard, x, 0.36, 6.41);
+    stripe.rotation.z = 0.6;
+    shell.add(stripe);
+  }
+  shell.add(cyl(0.12, 0.12, 0.8, M.metal, 0, 0.36, 6.43, 'x'));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.7, 0.2, 0.06, M.black, s * 1.25, 1.05, 6.0));
+    shell.add(box(0.6, 0.12, 0.04, M.headlight, s * 1.25, 1.05, 6.03));
+    shell.add(box(0.2, 0.08, 0.04, M.amber, s * 1.55, 0.86, 5.95));
+  }
+  shell.add(box(1.4, 0.04, 0.04, M.trim, 0, 1.3, 6.1));
+
+  // Interior: dash, screens, seats, crew.
+  shell.add(box(3.1, 0.26, 0.4, M.black, 0, 1.72, 5.05));
+  for (const x of [-0.7, 0.7]) {
+    shell.add(box(0.5, 0.02, 0.24, M.screen, x, 1.86, 5.0));
+    shell.add(box(0.6, 0.14, 0.6, M.black, x, 1.72, 3.9));
+    shell.add(box(0.6, 0.8, 0.1, M.black, x, 2.1, 3.55));
+  }
+  for (const [x, suit] of [[0.7, M.suitOrange], [-0.7, M.suit]]) {
+    const pilot = buildPilot(x, suit);
+    pilot.position.y += 1.36;
+    pilot.position.z += 2.75;
+    shell.add(pilot);
+  }
+
+  // Tail: lamps in a dark band, a rear door, bumper.
+  shell.add(box(3.2, 0.3, 0.06, M.hullDark, 0, 1.5, -6.38));
+  shell.add(box(1.3, 0.9, 0.05, M.hullLit, 0, 1.75, -6.36));
+  shell.add(box(3.4, 0.36, 0.3, M.hullDark, 0, 0.9, -6.3));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.55, 0.12, 0.04, M.tail, s * 1.2, 1.5, -6.42));
+    shell.add(box(0.12, 0.12, 0.04, M.amber, s * 1.6, 1.5, -6.42));
+  }
+
+  const setPanels = buildArray(root, { y: 2.62, z: -2.3 });
+
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0.7, 2.05, 4.65);
+  yokePivot.rotation.x = -0.5;
+  yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.03, 8, 20), M.black));
+  root.add(yokePivot);
+
+  return { yokePivot, setPanels, tailLamps: [V(1.2, 1.5, -6.42), V(-1.2, 1.5, -6.42)] };
+}
+
+// КОЙОТ, the buggy: a narrow faceted copper wedge riding high between big tyres on
+// long arms, a dark glass canopy over the nose, a teal light line under it.
+function buggyBody(shell, root) {
+  shell.add(loft([
+    { z: -3.35, pts: hex(1.7, -0.1, 2.0, 0.5, 1.6, 0.85) },
+    { z: -2.6, pts: hex(2.1, -0.3, 2.5, 0.6, 2.0, 1.0) },
+    { z: -0.6, pts: hex(2.2, -0.35, 2.6, 0.6, 2.1, 1.05) },
+    { z: 1.0, pts: hex(2.2, -0.3, 2.5, 0.5, 1.9, 0.75) },
+    { z: 2.6, pts: hex(2.0, -0.2, 2.3, 0.35, 1.7, 0.55) },
+    { z: 3.35, pts: hex(1.4, 0.0, 1.6, 0.25, 1.2, 0.35) },
+  ], M.copper));
+  // Canopy: dark glass from the roof line down over the nose.
+  shell.add(loft([
+    { z: -0.4, pts: hex(1.9, 0.6, 1.9, 0.9, 1.4, 1.1) },
+    { z: 0.6, pts: hex(1.9, 0.5, 1.85, 0.85, 1.35, 1.02) },
+    { z: 1.8, pts: hex(1.8, 0.4, 1.7, 0.62, 1.2, 0.72) },
+    { z: 2.7, pts: hex(1.5, 0.34, 1.4, 0.44, 1.0, 0.48) },
+  ], M.glassDark));
+  // Belly pan, rear vents, door seams, fins on the rear deck.
+  shell.add(box(1.6, 0.1, 5.8, M.hullDark, 0, -0.38, -0.1));
+  for (const x of [-0.5, 0.5]) shell.add(box(0.5, 0.08, 0.9, M.hullDark, x, 1.07, -2.2));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.02, 0.6, 0.03, M.copperDark, s * 1.3, 0.35, -0.3));
+    shell.add(box(0.02, 0.03, 2.0, M.copperDark, s * 1.28, 0.62, -1.4));
+    shell.add(box(0.3, 0.12, 0.6, M.copperDark, s * 1.05, 0.95, -0.9));
+    shell.add(box(0.05, 0.06, 0.3, M.amber, s * 1.1, 0.35, 2.7));
+  }
+  shell.add(box(1.8, 0.04, 0.03, M.teal, 0, 0.3, 2.85));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.36, 0.12, 0.05, M.headlight, s * 0.62, 0.14, 3.3));
+    shell.add(box(0.5, 0.1, 0.04, M.tail, s * 0.72, 0.62, -3.37));
+  }
+  // Exposed drivetrain under the tail: motor cans and a cross-member.
+  for (const s of [-1, 1]) shell.add(cyl(0.22, 0.22, 0.5, M.metalDark, s * 0.5, -0.45, -2.5, 'x'));
+  shell.add(box(2.2, 0.12, 0.16, M.black, 0, -0.3, -3.2));
+  shell.add(box(2.0, 0.12, 0.16, M.black, 0, -0.25, 3.1));
+
+  // Crew under the canopy.
+  shell.add(box(1.6, 0.18, 0.3, M.black, 0, 0.62, 1.7));
+  for (const [x, suit] of [[0.45, M.suitOrange], [-0.45, M.suit]]) {
+    shell.add(box(0.5, 0.1, 0.5, M.black, x, 0.3, 0.4));
+    const pilot = buildPilot(x, suit);
+    pilot.position.y -= 0.12;
+    pilot.position.z -= 0.25;
+    shell.add(pilot);
+  }
+
+  const setPanels = buildPanels(root, { x: 1.0, y: 1.1, z: -1.8 });
+
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0.45, 0.72, 1.35);
+  yokePivot.rotation.x = -0.6;
+  yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 8, 20), M.black));
+  root.add(yokePivot);
+
+  return { yokePivot, setPanels, tailLamps: [V(0.72, 0.62, -3.4), V(-0.72, 0.62, -3.4)] };
+}
+
+// СТРІЛА, the speedster: a low graphite monocoque over orange side pods, open
+// wheels, a single-seat glass canopy, a spine running back to a rear wing.
+function speedsterBody(shell, root) {
+  const sections = [
+    { z: -3.35, pts: hex(1.5, -0.8, 1.6, -0.2, 1.2, 0.1) },
+    { z: -1.6, pts: hex(1.8, -0.9, 1.9, -0.1, 1.5, 0.35) },
+    { z: -1.2, pts: hex(2.4, -0.95, 2.7, -0.1, 2.0, 0.45) },
+    { z: 1.3, pts: hex(2.3, -0.95, 2.6, -0.2, 1.9, 0.35) },
+    { z: 1.6, pts: hex(1.8, -0.95, 1.9, -0.3, 1.5, 0.1) },
+    { z: 2.9, pts: hex(1.7, -0.95, 1.8, -0.4, 1.4, -0.1) },
+    { z: 3.6, pts: hex(1.2, -0.85, 1.3, -0.6, 1.0, -0.45) },
+  ];
+  shell.add(loft(sections, M.graphite, true));
+  // Orange side pods: a skin over the lower flanks, a touch proud of the grey.
+  shell.add(loft([
+    { z: -1.15, pts: hex(2.44, -0.93, 2.74, -0.35, 2.7, -0.3) },
+    { z: 1.25, pts: hex(2.34, -0.93, 2.64, -0.45, 2.6, -0.4) },
+    { z: 2.8, pts: hex(1.74, -0.93, 1.84, -0.55, 1.8, -0.5) },
+  ], M.orange, true));
+  // Canopy.
+  shell.add(loft([
+    { z: -0.4, pts: hex(1.5, 0.3, 1.4, 0.8, 0.8, 0.98) },
+    { z: 0.8, pts: hex(1.5, 0.25, 1.4, 0.72, 0.8, 0.9) },
+    { z: 1.8, pts: hex(1.4, 0.05, 1.3, 0.35, 0.8, 0.45) },
+    { z: 2.6, pts: hex(1.2, -0.1, 1.1, 0.0, 0.7, 0.02) },
+  ], M.glass, true));
+  // Spine from the canopy back to the wing, and the wing on two struts.
+  shell.add(loft([
+    { z: -3.0, pts: hex(0.5, 0.3, 0.5, 0.62, 0.3, 0.7) },
+    { z: -0.5, pts: hex(0.6, 0.4, 0.6, 0.9, 0.35, 1.02) },
+    { z: -0.2, pts: hex(0.5, 0.5, 0.5, 0.95, 0.3, 1.0) },
+  ], M.graphite, true));
+  for (const s of [-1, 1]) shell.add(box(0.06, 0.5, 0.3, M.black, s * 0.8, 0.55, -3.2));
+  shell.add(box(2.3, 0.06, 0.55, M.graphite, 0, 0.85, -3.3));
+  shell.add(box(2.3, 0.03, 0.05, M.orange, 0, 0.9, -3.03));
+  for (const s of [-1, 1]) shell.add(box(0.05, 0.3, 0.6, M.graphite, s * 1.15, 0.8, -3.3));
+  // Splitter, lime running lights, headlamp slits, air intakes on the pods.
+  shell.add(box(1.8, 0.05, 1.0, M.black, 0, -0.97, 3.3));
+  for (const s of [-1, 1]) {
+    shell.add(box(0.5, 0.06, 0.05, M.headlight, s * 0.5, -0.5, 3.58));
+    shell.add(box(0.05, 0.05, 0.4, M.lime, s * 1.34, -0.7, 0.6));
+    shell.add(box(0.04, 0.3, 0.9, M.hullDark, s * 1.36, -0.25, -0.4));
+    for (let i = 0; i < 3; i++) shell.add(box(0.05, 0.02, 0.8, M.black, s * 1.38, -0.35 + i * 0.1, -0.4));
+    shell.add(box(0.5, 0.06, 0.04, M.tail, s * 0.7, 0.8, -3.58));
+  }
+  // Exposed rear mechanicals: motor, radiators, cross-brace.
+  shell.add(cyl(0.28, 0.28, 0.9, M.metalDark, 0, -0.4, -2.6, 'x'));
+  for (const s of [-1, 1]) shell.add(box(0.4, 0.5, 0.12, M.hullDark, s * 0.6, 0.05, -2.3));
+  shell.add(box(1.8, 0.1, 0.12, M.black, 0, -0.6, -3.35));
+
+  // Pilot under the canopy.
+  shell.add(box(1.0, 0.16, 0.3, M.black, 0, 0.18, 1.55));
+  shell.add(box(0.2, 0.02, 0.14, M.screen, 0, 0.27, 1.52));
+  const pilot = buildPilot(0, M.suitOrange);
+  pilot.position.y -= 0.62;
+  pilot.position.z -= 0.2;
+  shell.add(pilot);
+
+  const setPanels = buildPanels(root, { x: 0.95, y: 0.62, z: -1.95 });
+
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0, 0.3, 1.25);
+  yokePivot.rotation.x = -0.9;
+  yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 8, 20), M.black));
+  root.add(yokePivot);
+
+  return { yokePivot, setPanels, tailLamps: [V(0.7, 0.8, -3.6), V(-0.7, 0.8, -3.6)] };
+}
+
 // ---------- vehicle ----------
 
 export function buildVehicle() {
   const root = new THREE.Group();
   const shell = new THREE.Group(); // static body, merged at the end
-  const { yokePivot, setPanels, tailLamps } = (CHASSIS === 'crawler' ? crawlerBody : truckBody)(shell, root);
+  const { yokePivot, setPanels, tailLamps } = ({ truck: truckBody, crawler: crawlerBody, hauler: haulerBody, buggy: buggyBody, speedster: speedsterBody }[CHASSIS])(shell, root);
 
   // Wheels + suspension, one corner per entry in the shared wheel table.
   const wheels = WHEEL_DEFS.map((d) => {

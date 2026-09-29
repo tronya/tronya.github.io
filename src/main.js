@@ -42,13 +42,13 @@ const DRAW_IDLE = 0.12; // %/s just being alive
 const DRAW_DRIVE = 0.62; // %/s at full power
 const CHARGE_PEAK = 1.5; // %/s with the wings open and the sun overhead
 // Time to unfold or stow; the crawler's array opens in two stages, so it takes longer.
-const PANEL_SECONDS = CHASSIS === 'crawler' ? 4.2 : 2.6;
+const PANEL_SECONDS = CHASSIS === 'crawler' || CHASSIS === 'hauler' ? 4.2 : 2.6;
 const LOW_BATTERY = 20;
 const BOOST_DRAW = 4.5; // Shift is fast but drinks the pack
 // Default camera: low behind the truck.
 // The crawler is 2.5 m longer; at the scout's distance it filled the frame.
-const CAM_BACK = CHASSIS === 'crawler' ? 16 : 13;
-const CAM_UP = CHASSIS === 'crawler' ? 2.6 : 2;
+const CAM_BACK = { truck: 13, crawler: 16, hauler: 19, buggy: 12, speedster: 11.5 }[CHASSIS];
+const CAM_UP = { truck: 2, crawler: 2.6, hauler: 3.4, buggy: 2, speedster: 1.6 }[CHASSIS];
 // Cinematic camera modes, cycled with C. Chase/far still turn with the truck's
 // heading and can be dragged/zoomed by hand (same trick as the default camera);
 // top-down and orbit are fully automatic and lock out manual control.
@@ -574,10 +574,11 @@ function storyCtx() {
 
 function refreshChapter() {
   if (story.finished) {
-    chapterEl.textContent = 'ЗАВДАННЯ · вільний політ';
+    chapterEl.innerHTML = '<i>ЗАВДАННЯ ВИКОНАНО</i>вільний політ';
     return;
   }
-  chapterEl.textContent = `ЗАВДАННЯ ${story.index + 1}/${story.total} · ${story.objective(storyCtx()).text}`;
+  const text = story.objective(storyCtx()).text;
+  chapterEl.innerHTML = `<i>ЗАВДАННЯ ${story.index + 1}/${story.total}</i>${text.charAt(0).toUpperCase() + text.slice(1)}`;
 }
 
 for (const p of ['mars', 'moon', 'verdanta']) {
@@ -680,6 +681,7 @@ try { odo.total = Number(localStorage.getItem('rover.odo')) || 0; } catch (e) { 
 const hudOdoTrip = document.getElementById('odoTrip');
 const hudOdoTotal = document.getElementById('odoTotal');
 const hudMissions = document.getElementById('missionStat');
+const hudCarried = document.getElementById('carriedStat');
 const hudDebris = document.getElementById('debrisStat');
 const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
 
@@ -908,7 +910,6 @@ minimap.resize();
 // that, not the tick spacing, is what keeps it legible over bright ground too.
 const compassCtx = document.getElementById('compassCanvas').getContext('2d');
 const CARDINAL = { 0: 'Пн', 90: 'Сх', 180: 'Пд', 270: 'Зх' };
-const HALF_WINDOW = 62; // degrees shown either side of centre
 function wrapDeg(d) {
   return ((d % 360) + 360) % 360;
 }
@@ -918,16 +919,77 @@ function outlinedText(c, text, x, y) {
   c.strokeText(text, x, y);
   c.fillText(text, x, y);
 }
-function drawCompass(yaw, waypoints) {
+// The game's forward is +Z at yaw 0, and a positive yaw turns toward +X — which,
+// seen from behind the rover, is to its LEFT. So compass heading (clockwise from
+// north = +Z, as on any real compass) is minus the yaw, not the yaw itself; using
+// the yaw straight made the tape scroll the wrong way round.
+function compassBearing(dx, dz) {
+  return wrapDeg((-Math.atan2(dx, dz) * 180) / Math.PI);
+}
+function fmtRange(d) {
+  return d < 1000 ? `${Math.round(d / 10) * 10} м` : `${(d / 1000).toFixed(d < 10000 ? 1 : 0)} км`;
+}
+// The tape sits between the mission panel (left, 250 px) and the rover panel
+// (right, 230 px), so its width follows the window: as wide as fits the gap, 560 px
+// at most. The scale per degree stays fixed; a narrower tape just shows fewer degrees.
+const COMPASS_H = 70;
+const PX_PER_DEG = 560 / 130;
+let COMPASS_W = 560;
+let HALF_WINDOW = 62;
+function sizeCompass() {
+  const gap = window.innerWidth / 2 - (16 + 250 + 14);
+  COMPASS_W = Math.round(Math.max(200, Math.min(560, gap * 2)));
+  HALF_WINDOW = COMPASS_W / 2 / PX_PER_DEG;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  compassCtx.canvas.width = COMPASS_W * dpr;
+  compassCtx.canvas.height = COMPASS_H * dpr;
+  compassCtx.canvas.style.width = COMPASS_W + 'px';
+  compassCtx.canvas.style.height = COMPASS_H + 'px';
+  compassCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+sizeCompass();
+window.addEventListener('resize', sizeCompass);
+function compassBadge(c, t, x, y, withDist) {
+  const r = 9;
+  c.fillStyle = t.color;
+  c.beginPath();
+  if (t.kind === 'diamond') {
+    c.moveTo(x, y - r); c.lineTo(x + r, y); c.lineTo(x, y + r); c.lineTo(x - r, y);
+    c.closePath();
+  } else if (t.kind === 'square') {
+    c.roundRect(x - r + 1, y - r + 1, 2 * r - 2, 2 * r - 2, 3);
+  } else {
+    c.arc(x, y, r, 0, Math.PI * 2);
+  }
+  c.fill();
+  c.lineWidth = 2;
+  c.strokeStyle = 'rgba(20, 10, 6, 0.9)';
+  c.stroke();
+  if (t.text) {
+    c.fillStyle = '#0d1a22';
+    c.font = 'bold 11px ui-monospace, monospace';
+    c.textBaseline = 'middle';
+    c.fillText(t.text, x, y + 1);
+    c.textBaseline = 'alphabetic';
+  }
+  if (!withDist) return;
+  c.font = 'bold 10px ui-monospace, monospace';
+  c.fillStyle = '#f4ead8';
+  const text = fmtRange(t.dist);
+  const half = c.measureText(text).width / 2 + 3;
+  outlinedText(c, text, Math.min(COMPASS_W - half, Math.max(half, x)), y + r + 12);
+}
+function drawCompass(yaw, targets) {
   const c = compassCtx;
-  const w = c.canvas.width;
-  const h = c.canvas.height;
-  const headingDeg = wrapDeg((yaw * 180) / Math.PI);
-  const pxPerDeg = w / 130;
+  const w = COMPASS_W;
+  const h = COMPASS_H;
+  const headingDeg = wrapDeg((-yaw * 180) / Math.PI);
+  const pxPerDeg = PX_PER_DEG;
   const cx = w / 2;
   c.clearRect(0, 0, w, h);
   c.textAlign = 'center';
   c.textBaseline = 'alphabetic';
+  const base = h - 4; // ribbon baseline
 
   // Ticks and labels are generated straight from world degrees (multiples of 10,
   // major every 30), never from a fixed screen step — that's what made numbers
@@ -943,53 +1005,54 @@ function drawCompass(yaw, waypoints) {
     c.lineWidth = major ? 4.2 : 2.6;
     c.strokeStyle = 'rgba(20, 10, 6, 0.85)';
     c.beginPath();
-    c.moveTo(x, h - (major ? 20 : 12));
-    c.lineTo(x, h - 4);
+    c.moveTo(x, base - (major ? 16 : 8));
+    c.lineTo(x, base);
     c.stroke();
     c.lineWidth = major ? 1.8 : 1.1;
     c.strokeStyle = major ? 'rgba(255, 214, 176, 0.95)' : 'rgba(255, 214, 176, 0.55)';
     c.beginPath();
-    c.moveTo(x, h - (major ? 20 : 12));
-    c.lineTo(x, h - 4);
+    c.moveTo(x, base - (major ? 16 : 8));
+    c.lineTo(x, base);
     c.stroke();
     if (major) {
       c.font = 'bold 12px ui-monospace, monospace';
       c.fillStyle = CARDINAL[wrapped] ? '#7ce6ff' : '#ffd6b0';
-      outlinedText(c, CARDINAL[wrapped] || String(wrapped), x, h - 26);
+      outlinedText(c, CARDINAL[wrapped] || String(wrapped), x, base - 20);
     }
   }
 
-  // Waypoints: where each numbered route point actually lies, as a badge above the
-  // ribbon — the same idea as an objective marker on a game compass. A bare triangle
-  // was too small to hold a legible digit, so this is a numbered disc instead, the
-  // same shape and colour as its marker on the map.
-  if (waypoints) {
-    const r = 9;
-    const badgeY = 13;
-    for (const wp of waypoints) {
-      let d = ((wp.bearing - headingDeg + 180) % 360 + 360) % 360 - 180;
-      if (Math.abs(d) > HALF_WINDOW) continue;
-      const x = cx + d * pxPerDeg;
-      // Tail pointing down at the ribbon, then the disc on top of it.
-      c.fillStyle = wp.color;
-      c.beginPath();
-      c.moveTo(x - 5, badgeY + r - 2);
-      c.lineTo(x + 5, badgeY + r - 2);
-      c.lineTo(x, badgeY + r + 7);
-      c.closePath();
-      c.fill();
-      c.beginPath();
-      c.arc(x, badgeY, r, 0, Math.PI * 2);
-      c.fillStyle = wp.color;
-      c.fill();
-      c.lineWidth = 2;
-      c.strokeStyle = 'rgba(20, 10, 6, 0.9)';
-      c.stroke();
-      c.fillStyle = '#0d1a22';
-      c.font = 'bold 11px ui-monospace, monospace';
-      c.textBaseline = 'middle';
-      c.fillText(String(wp.n), x, badgeY + 1);
-      c.textBaseline = 'alphabetic';
+  // Targets — route points, unpicked modules, bases — as badges above the ribbon,
+  // each with its distance under it, the same shape and colour as on the map. One
+  // past the edge of the tape is pinned to that edge with an arrow, so a target
+  // behind you still says which way to turn. Nearest drawn last, so on top.
+  if (targets) {
+    const badgeY = 12;
+    // Place nearest first: a badge that would crowd one already placed keeps its
+    // icon but drops its distance, so the digits never run into each other. Then
+    // draw farthest first, so the nearest ends up on top.
+    const shown = [];
+    for (const t of [...targets].sort((a, b) => a.dist - b.dist)) {
+      const d = ((t.bearing - headingDeg + 180) % 360 + 360) % 360 - 180;
+      t.off = Math.abs(d) > HALF_WINDOW - 4;
+      if (t.off && t.kind !== 'circle') continue; // only route points get edge pins
+      t.side = Math.sign(d);
+      t.sx = t.off ? cx + t.side * (w / 2 - 14) : cx + d * pxPerDeg;
+      t.withDist = !shown.some((o) => o.withDist && Math.abs(o.sx - t.sx) < 46);
+      shown.push(t);
+    }
+    for (const t of shown.reverse()) {
+      const x = t.sx;
+      if (t.off) {
+        const s = t.side;
+        c.fillStyle = t.color;
+        c.beginPath();
+        c.moveTo(x + s * 14, badgeY);
+        c.lineTo(x + s * 8, badgeY - 5);
+        c.lineTo(x + s * 8, badgeY + 5);
+        c.closePath();
+        c.fill();
+      }
+      compassBadge(c, t, x, badgeY, t.withDist);
     }
   }
 
@@ -1409,7 +1472,8 @@ function frame() {
       // all that is needed here is to let the buttons catch up.
       if (missionEvent.type === 'deliver') refreshPlanets();
     }
-    hudMissions.textContent = `везеш ${missions.carriedCount()} · здано ${missions.deliveredCount()}/${missions.total}`;
+    hudMissions.textContent = `${missions.deliveredCount()}/${missions.total}`;
+    hudCarried.textContent = String(missions.carriedCount());
 
     const debrisEvent = debris.update(t, sim.pos.x, sim.pos.z);
     if (debrisEvent) {
@@ -1436,14 +1500,20 @@ function frame() {
   }
 
   hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год · ${SPEC.driveLabel[sim.awd ? 0 : 1]}`;
-  drawCompass(
-    sim.yaw(),
-    route.map((p, i) => ({
-      n: i + 1,
-      bearing: (Math.atan2(p.x - sim.pos.x, p.z - sim.pos.z) * 180) / Math.PI,
-      color: i === 0 ? '#7ce68f' : '#4fe0ff',
-    }))
-  );
+  const compassTargets = route.map((p, i) => ({
+    x: p.x, z: p.z, kind: 'circle', text: String(i + 1), color: i === 0 ? '#7ce68f' : '#4fe0ff',
+  }));
+  if (PLANET === 'mars') {
+    for (const m of missions.modules) {
+      if (!m.collected) compassTargets.push({ x: m.x, z: m.z, kind: 'diamond', color: '#' + m.color.toString(16).padStart(6, '0') });
+    }
+  }
+  for (const b of BASES) compassTargets.push({ x: b.x, z: b.z, kind: 'square', text: b.name[0], color: '#4fe0ff' });
+  for (const t of compassTargets) {
+    t.bearing = compassBearing(t.x - sim.pos.x, t.z - sim.pos.z);
+    t.dist = Math.hypot(t.x - sim.pos.x, t.z - sim.pos.z);
+  }
+  drawCompass(sim.yaw(), compassTargets);
   if (!map3dEl.classList.contains('hidden')) minimap.update(sim, dt);
   sunShadows.update();
   if ((tagClock += dt) > 0.5) { tagClock = 0; tagLayers(scene); }

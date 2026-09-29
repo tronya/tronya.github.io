@@ -75,9 +75,9 @@ const UP_MIN = 0.5;
 const UP_FADE = 0.8;
 // Stock motor. The workshop's ДВИГУН upgrade scales this via sim.powerMul — 180,
 // 360 or 540 kW (see upgrades.js) — instead of this file hard-coding a fixed value.
-const F_DRIVE = 26000; // total, all wheels, at the stock 180 kW
+const F_DRIVE = 26000 * (SPEC.power ?? 1); // total, all wheels, at the stock 180 kW
 const N_FRONT = WHEEL_DEFS.filter((w) => w.front).length;
-const POWER = 180000;
+const POWER = 180000 * (SPEC.power ?? 1); // the light chassis get a hotter motor
 const V_MAX = SPEC.vMax; // ~43 km/h cruising, AWD mode only
 const V_MAX_BOOST = SPEC.vMaxBoost; // Shift only, and it drinks the battery — stays above V_MAX_RWD
 const V_MAX_REVERSE = 6;
@@ -88,7 +88,7 @@ const V_MAX_REVERSE = 6;
 // at the switch point doesn't clatter the front axle in and out every second.
 const AWD_UP = 40 / 3.6;
 const AWD_DOWN = 36 / 3.6;
-const V_MAX_RWD = 100 / 3.6; // ~28 m/s — the whole point of dropping the front axle
+const V_MAX_RWD = SPEC.vMaxRwd ?? 100 / 3.6; // ~28 m/s — the whole point of dropping the front axle
 // Steering behaves like a wheel, not a spring: the angle stays where it is left.
 const MECH_STEER = 0.56; // mechanical lock at the knuckle
 // Time to wind the wheel from centre to full lock. Scaling the rate to the current
@@ -99,7 +99,7 @@ const BRAKE_FORCE = 3.2 * CORNER; // per wheel
 // Regolith is soft: a rover that stops pulling slows down noticeably. The linear
 // term is rolling resistance, the quadratic one stands in for churning through dust.
 const ROLLING_RES = 0.17;
-const DRAG_V2 = 22; // N per (m/s)^2
+const DRAG_V2 = 22 * (SPEC.drag ?? 1); // N per (m/s)^2 — less for a low, light body
 const SUBSTEP = 1 / 240;
 // The corridor ridges are the map boundary now; this is just a last-ditch backstop.
 const MAX_RADIUS = 20000;
