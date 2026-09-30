@@ -119,8 +119,11 @@ for (const grid of SPEC.hullGrids) {
 // mass — without it a truck on its flank tipped straight back onto its wheels or its
 // roof instead of lying there. The points stay above the tread even at full bump, so
 // they never touch the ground while driving.
-for (const x of [-SPEC.tyreFaceX, SPEC.tyreFaceX]) for (const z of SPEC.axleZ) for (const dy of [-0.55, 0, 0.55]) {
-  BODY_POINTS.push(new THREE.Vector3(x, -SUSP.Lstatic + dy, z));
+// A chassis with bigger rear tyres gives one face per axle, and those points follow the
+// taller rear hub (w.my) and radius (w.rs) the same way the wheel does.
+for (const w of WHEEL_DEFS) {
+  const face = Array.isArray(SPEC.tyreFaceX) ? SPEC.tyreFaceX[w.axle] : SPEC.tyreFaceX;
+  for (const dy of [-0.55, 0, 0.55]) BODY_POINTS.push(new THREE.Vector3(w.s * face, w.my - SUSP.Lstatic + dy * w.rs, w.z));
 }
 const F_SUSP_MAX = 9 * CORNER; // a wheel can never push harder than ~9x its static load
 const F_HULL_MAX = 4 * WEIGHT;
@@ -188,6 +191,11 @@ const force = V3(), torque = V3(), grad = { x: 0, z: 0 };
 const nrm = V3(), dir = V3(), fw = V3(), lw = V3(), f0 = V3();
 const wb = V3(), tb = V3(), iw = V3(), gyro = V3(), blk = V3();
 const rxn = V3(), tmpI = V3();
+// Per hull point: where it was last sampled (x, z, y) and its clearance then.
+// Clearance starts negative, so every point is sampled on the first step.
+const hullSeen = new Float32Array(BODY_POINTS.length * 4).fill(-1);
+const HULL_SKIP = 0.5; // m of clearance that always gets re-checked
+const HULL_SLOPE = 8; // steepest ground rise per metre moved (a boulder's edge)
 const hullContacts = Array.from({ length: BODY_POINTS.length }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0 }));
 // World-space inverse inertia applied to a vector: out = R diag(1/I) R^T v.
 function invInertia(v, out, q) {
@@ -339,10 +347,21 @@ export class VehicleSim {
   solveHull(h) {
     const { quat: q, pos, vel, angVel } = this;
     let n = 0;
-    for (const b of BODY_POINTS) {
-      rel.copy(b).sub(COM).applyQuaternion(q);
+    for (let i = 0; i < BODY_POINTS.length; i++) {
+      rel.copy(BODY_POINTS[i]).sub(COM).applyQuaternion(q);
       tmpB.copy(pos).add(rel);
+      // Most hull points ride a metre or two clear of the ground, and in 1/240 s the
+      // ground under them cannot rise that far. A point last seen well clear is not
+      // re-sampled until it has moved enough — sideways, or down — that ground as
+      // steep as a boulder's flank (HULL_SLOPE) could have caught up with it.
+      const k = i * 4;
+      const moved = Math.hypot(tmpB.x - hullSeen[k], tmpB.z - hullSeen[k + 1]) + Math.max(0, hullSeen[k + 2] - tmpB.y);
+      if (hullSeen[k + 3] > HULL_SKIP + HULL_SLOPE * moved) continue;
       const gh = groundHeight(tmpB.x, tmpB.z);
+      hullSeen[k] = tmpB.x;
+      hullSeen[k + 1] = tmpB.z;
+      hullSeen[k + 2] = tmpB.y;
+      hullSeen[k + 3] = tmpB.y - gh;
       const pen = Math.min(gh - tmpB.y, 0.8);
       if (pen <= 0) continue;
       groundGradient(tmpB.x, tmpB.z, grad);

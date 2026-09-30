@@ -247,7 +247,8 @@ export function createSand({ count = 2800, radius = 120 } = {}) {
           if (dx > 2.2 || dx < -2.2 || dz > 2.2 || dz < -2.2) continue;
           const lx = dx * cosY - dz * sinY;
           const lz = dx * sinY + dz * cosY;
-          if (lx < TYRE_HALF_W && lx > -TYRE_HALF_W && lz < TYRE_HALF_L && lz > -TYRE_HALF_L) {
+          const hw = TYRE_HALF_W * (wh.wk || 1); // the speedster's rears are wider
+          if (lx < hw && lx > -hw && lz < TYRE_HALF_L && lz > -TYRE_HALF_L) {
             kick(i, lx, scratch);
             break;
           }

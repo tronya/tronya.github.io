@@ -577,6 +577,30 @@ export function findObstacles(x, z, radius, minH, out = []) {
   return out;
 }
 
+// Physics asks for the ground ~100 times a substep, 240 substeps a second, and each
+// ask used to re-derive the nine surrounding stone cells from scratch — road
+// distance, density noise, base flattening — which cost as much as the terrain noise
+// itself. A cell's stone never changes, so it is resolved once and remembered, along
+// with the terrain height under its centre. Exactly the same result, a fraction of
+// the work. The cache is dropped whole when it grows past twenty thousand cells.
+const stoneCache = new Map();
+const NO_STONE = null;
+function cachedStone(ci, cj) {
+  const key = ci * 131072 + cj;
+  let s = stoneCache.get(key);
+  if (s === undefined) {
+    if (stoneCache.size > 20000) stoneCache.clear();
+    s = stoneInCell(ci, cj)
+      ? {
+        x: stone.x, z: stone.z, r: stone.r, h: stone.h, big: stone.big,
+        r2: stone.r * stone.r, top: stone.h * 0.95, base: terrainHeight(stone.x, stone.z),
+      }
+      : NO_STONE;
+    stoneCache.set(key, s);
+  }
+  return s;
+}
+
 // Terrain plus any rock the wheel is standing on.
 export function groundHeight(x, z) {
   let h = terrainHeight(x, z);
@@ -584,13 +608,13 @@ export function groundHeight(x, z) {
   const cj = Math.floor(z / STONE_CELL);
   for (let di = -1; di <= 1; di++) {
     for (let dj = -1; dj <= 1; dj++) {
-      if (!stoneInCell(ci + di, cj + dj)) continue;
-      const dx = x - stone.x;
-      const dz = z - stone.z;
-      const r2 = stone.r * stone.r;
+      const s = cachedStone(ci + di, cj + dj);
+      if (!s) continue;
+      const dx = x - s.x;
+      const dz = z - s.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 >= r2) continue;
-      const top = terrainHeight(stone.x, stone.z) + stone.h * 0.95 * Math.pow(1 - d2 / r2, 0.55);
+      if (d2 >= s.r2) continue;
+      const top = s.base + s.top * Math.pow(1 - d2 / s.r2, 0.55);
       if (top > h) h = top;
     }
   }
@@ -840,60 +864,21 @@ const _c = new THREE.Color();
 // triangles inside its own tile, so border normals came out wrong and every tile
 // edge showed as a straight dark seam across the plain. Central differences on a
 // padded grid depend only on world position, so neighbouring tiles agree exactly.
-const padH = new Float32Array((SEG + 3) * (SEG + 3));
 // Every tile shares the same vertex layout, so the vertex -> padded-grid mapping is
 // computed once instead of rounding coordinates for every vertex of every tile.
 let padIndex = null;
 
-function fillTile(geo, ox, oz, seg) {
-  const pos = geo.attributes.position;
-  const normal = geo.attributes.normal;
-  const n = seg + 1;
-  const P = n + 2;
-  const step = TILE / seg;
-  for (let j = -1; j <= n; j++) {
-    const wz = oz + j * step;
-    for (let i = -1; i <= n; i++) {
-      padH[(j + 1) * P + (i + 1)] = terrainHeight(ox + i * step, wz);
-    }
-  }
-  if (!padIndex) {
-    padIndex = new Int32Array(pos.count);
-    for (let k = 0; k < pos.count; k++) {
-      const i = Math.round(pos.getX(k) / step);
-      const j = Math.round(pos.getZ(k) / step);
-      padIndex[k] = (j + 1) * P + (i + 1);
-    }
-  }
-  const inv = 1 / (2 * step);
-  const posArr = pos.array;
-  const nrmArr = normal.array;
+// Vertex k of a tile's geometry -> its cell in a padded (SEG+3)² height grid, so the
+// normal at every vertex can read its four neighbours, border ones included.
+function ensurePadIndex(pos, step, P) {
+  if (padIndex) return padIndex;
+  padIndex = new Int32Array(pos.count);
   for (let k = 0; k < pos.count; k++) {
-    const p = padIndex[k];
-    posArr[k * 3 + 1] = padH[p];
-    const dx = (padH[p + 1] - padH[p - 1]) * inv;
-    const dz = (padH[p + P] - padH[p - P]) * inv;
-    const inv2 = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
-    nrmArr[k * 3] = -dx * inv2;
-    nrmArr[k * 3 + 1] = inv2;
-    nrmArr[k * 3 + 2] = -dz * inv2;
+    const i = Math.round(pos.getX(k) / step);
+    const j = Math.round(pos.getZ(k) / step);
+    padIndex[k] = (j + 1) * P + (i + 1);
   }
-  pos.needsUpdate = true;
-  normal.needsUpdate = true;
-
-  const col = geo.attributes.color;
-  const uv = geo.attributes.uv;
-  for (let k = 0; k < pos.count; k++) {
-    const x = ox + pos.getX(k);
-    const z = oz + pos.getZ(k);
-    // World-space UVs: the texture runs continuously across tile borders.
-    uv.setXY(k, x / TEX_METERS, z / TEX_METERS);
-    groundColorAt(x, z, pos.getY(k), nrmArr[k * 3 + 1], _c);
-    col.setXYZ(k, _c.r, _c.g, _c.b);
-  }
-  col.needsUpdate = true;
-  uv.needsUpdate = true;
-  geo.computeBoundingSphere();
+  return padIndex;
 }
 
 // The ground's own colour at a point — shared by the terrain mesh's vertex colours
@@ -944,7 +929,7 @@ function groundColorAt(x, z, y, normalY, out) {
 }
 
 // For callers outside the tile builder (no ready-made vertex normal): a cheap central
-// difference of the height field itself, same trick fillTile uses for lighting.
+// difference of the height field itself, same trick the tile builder uses for lighting.
 const _gcEps = 0.6;
 export function groundColorAtXZ(x, z, out = new THREE.Color()) {
   const y = terrainHeight(x, z);
@@ -1081,13 +1066,12 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
   const posV = new THREE.Vector3();
   const axisY = new THREE.Vector3(0, 1, 0);
 
-  // Assumes `stone` already holds the record from a just-true `stoneInCell(ci, cj)`
-  // call; writes it into instance slot n. Shared by the per-tile fill below and the
+  // Writes stone record `s` (from cachedStone) into instance slot n. Shared by the per-tile fill below and the
   // near-field shadow fill, so both draw the exact same rock the exact same way.
-  function writeRockInstance(im, n, ci, cj) {
+  function writeRockInstance(im, n, ci, cj, s) {
     q.setFromAxisAngle(axisY, hash(ci + 5, cj + 9) * Math.PI * 2);
-    posV.set(stone.x, terrainHeight(stone.x, stone.z), stone.z);
-    scl.set(stone.r, stone.h, stone.r);
+    posV.set(s.x, s.base, s.z);
+    scl.set(s.r, s.h, s.r);
     m4.compose(posV, q, scl);
     im.setMatrixAt(n, m4);
     // Верданта's boulders were nearly black, and against its bright moss that read
@@ -1099,7 +1083,7 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
     const shade = lo + span * hash(ci + 77, cj + 12);
     const sat = PLANET === 'moon' ? 0.03 : PLANET === 'verdanta' ? 0.05 : 0.38;
     const hue = PLANET === 'verdanta' ? 0.28 : 0.045;
-    _c.setHSL(hue + 0.03 * hash(ci, cj + 3), sat, stone.big ? shade * 0.85 : shade);
+    _c.setHSL(hue + 0.03 * hash(ci, cj + 3), sat, s.big ? shade * 0.85 : shade);
     im.setColorAt(n, _c);
   }
 
@@ -1113,8 +1097,9 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
       for (let di = 0; di < span && n < im.instanceMatrix.count; di++) {
         const ci = ci0 + di;
         const cj = cj0 + dj;
-        if (!stoneInCell(ci, cj)) continue;
-        writeRockInstance(im, n, ci, cj);
+        const st = cachedStone(ci, cj);
+        if (!st) continue;
+        writeRockInstance(im, n, ci, cj, st);
         n++;
       }
     }
@@ -1136,11 +1121,12 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
       for (let di = 0; di < span && n < nearRocks.instanceMatrix.count; di++) {
         const ci = ci0 + di;
         const cj = cj0 + dj;
-        if (!stoneInCell(ci, cj)) continue;
-        const dx = stone.x - x;
-        const dz = stone.z - z;
+        const st = cachedStone(ci, cj);
+        if (!st) continue;
+        const dx = st.x - x;
+        const dz = st.z - z;
         if (dx * dx + dz * dz > r2) continue;
-        writeRockInstance(nearRocks, n, ci, cj);
+        writeRockInstance(nearRocks, n, ci, cj, st);
         n++;
       }
     }
@@ -1159,6 +1145,82 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
   const queue = [];
   let centerI = NaN;
   let centerJ = NaN;
+
+  // Building a tile takes 20–40 ms (2 600 terrain samples, then four noise layers of
+  // colour per vertex, then its rocks), and crossing a tile border re-slots a whole
+  // row of 21. Built a few whole tiles a frame, that was a half-second freeze every
+  // 220 m. Now one tile at a time is built in slices — a row of heights, then a row
+  // of colours — against a per-frame time budget, and only written into its
+  // geometry once complete. Same result as building it in one go, spread thin.
+  const NB = SEG + 1;
+  const PB = NB + 2;
+  const STEP = TILE / SEG;
+  const INV2 = 1 / (2 * STEP);
+  const jobH = new Float32Array(PB * PB);
+  const jobC = new Float32Array(NB * NB * 3);
+  let job = null;
+
+  function commitJob() {
+    const { t, ox, oz } = job;
+    const geo = t.mesh.geometry;
+    const pos = geo.attributes.position;
+    const idx = ensurePadIndex(pos, STEP, PB);
+    const posArr = pos.array;
+    const nrmArr = geo.attributes.normal.array;
+    const col = geo.attributes.color;
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < pos.count; k++) {
+      const p = idx[k];
+      posArr[k * 3 + 1] = jobH[p];
+      const dx = (jobH[p + 1] - jobH[p - 1]) * INV2;
+      const dz = (jobH[p + PB] - jobH[p - PB]) * INV2;
+      const inv = 1 / Math.sqrt(dx * dx + 1 + dz * dz);
+      nrmArr[k * 3] = -dx * inv;
+      nrmArr[k * 3 + 1] = inv;
+      nrmArr[k * 3 + 2] = -dz * inv;
+      const c = (((p / PB) | 0) - 1) * NB * 3 + ((p % PB) - 1) * 3;
+      col.setXYZ(k, jobC[c], jobC[c + 1], jobC[c + 2]);
+      // World-space UVs: the texture runs continuously across tile borders.
+      uv.setXY(k, (ox + pos.getX(k)) / TEX_METERS, (oz + pos.getZ(k)) / TEX_METERS);
+    }
+    pos.needsUpdate = true;
+    geo.attributes.normal.needsUpdate = true;
+    col.needsUpdate = true;
+    uv.needsUpdate = true;
+    geo.computeBoundingSphere();
+    fillRocks(t, ox, oz);
+  }
+
+  // Advance the current tile until `deadline`; clears `job` once it is in place.
+  function stepJob(deadline) {
+    const { t, ox, oz } = job;
+    // Re-slotted while half built: it is already back in the queue for its new spot.
+    if (t.ti !== job.ti || t.tj !== job.tj) { job = null; return; }
+    do {
+      const j = job.row;
+      if (job.phase === 0) {
+        const wz = oz + j * STEP;
+        for (let i = -1; i <= NB; i++) jobH[(j + 1) * PB + (i + 1)] = terrainHeight(ox + i * STEP, wz);
+        if (++job.row > NB) { job.phase = 1; job.row = 0; }
+      } else if (job.phase === 1) {
+        for (let i = 0; i < NB; i++) {
+          const p = (j + 1) * PB + (i + 1);
+          const dx = (jobH[p + 1] - jobH[p - 1]) * INV2;
+          const dz = (jobH[p + PB] - jobH[p - PB]) * INV2;
+          groundColorAt(ox + i * STEP, oz + j * STEP, jobH[p], 1 / Math.sqrt(dx * dx + 1 + dz * dz), _c);
+          const c = (j * NB + i) * 3;
+          jobC[c] = _c.r;
+          jobC[c + 1] = _c.g;
+          jobC[c + 2] = _c.b;
+        }
+        if (++job.row >= NB) job.phase = 2;
+      } else {
+        commitJob();
+        job = null;
+        return;
+      }
+    } while (performance.now() < deadline);
+  }
 
   // beam: optional {dx, dz} unit vector of the long-range spotlight, so rocks along it
   // cast shadows as far out as the beam reaches.
@@ -1182,13 +1244,15 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
       queue.sort((a, b) =>
         Math.hypot(a.ti * TILE - x, a.tj * TILE - z) - Math.hypot(b.ti * TILE - x, b.tj * TILE - z));
     }
-    // Rebuilding a whole row in one frame stutters; spread it out.
-    for (let n = 0; n < budget && queue.length; n++) {
-      const t = queue.shift();
-      const ox = t.ti * TILE;
-      const oz = t.tj * TILE;
-      fillTile(t.mesh.geometry, ox, oz, SEG);
-      fillRocks(t, ox, oz);
+    // Tile rebuilds, sliced against a time budget in ms (see stepJob). More than a
+    // row behind (the speedster at full tilt), it spends twice that to catch up.
+    const deadline = performance.now() + (queue.length > GRID ? budget * 2 : budget);
+    while ((job || queue.length) && performance.now() < deadline) {
+      if (!job) {
+        const t = queue.shift();
+        job = { t, ti: t.ti, tj: t.tj, ox: t.ti * TILE, oz: t.tj * TILE, phase: 0, row: -1 };
+      }
+      stepJob(deadline);
     }
     // Near-field rock shadows are handled entirely by the dedicated nearRocks mesh
     // now (see below) — accurate per rock, not per 220 m tile.
@@ -1213,12 +1277,12 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
       }
       t.rocks.castShadow = cast;
     }
-    return queue.length;
+    return queue.length + (job ? 1 : 0);
   }
 
   function prime(x, z) {
     update(x, z, 0);
-    while (queue.length) update(x, z, 8);
+    while (queue.length || job) update(x, z, Infinity);
   }
 
   return { group, update, prime, TILE, GRID, detailAmt };

@@ -23,6 +23,7 @@ const SPECS = {
   // whole game was balanced around — do not drift them.
   truck: {
     id: 'truck',
+    blurb: 'збалансований, прощає помилки; на швидкості відключає передній міст',
     name: 'СКАУТ 4×4',
     tag: 'сонячний ровер · Гермес-3',
     driveLabel: ['4×4', '4×2'],
@@ -66,6 +67,7 @@ const SPECS = {
   // if one wheel is in a hole.
   crawler: {
     id: 'crawler',
+    blurb: 'повільний, але лізе будь-куди: блоковані диференціали, усі колеса кермові',
     name: 'КРАУЛЕР 6×6',
     tag: 'важкий краулер · Титан-6',
     driveLabel: ['6×6', '6×6'],
@@ -126,6 +128,7 @@ const SPECS = {
   // suspension and locked diffs, on bigger tyres under a heavier body.
   hauler: {
     id: 'hauler',
+    blurb: 'важкий і стійкий, знижена передача; неквапливий, зате майже не перекидається',
     name: 'ТРАНСПОРТЕР 8×8',
     tag: 'броньований транспортер · Атлас-8',
     driveLabel: ['8×8', '8×8'],
@@ -160,15 +163,16 @@ const SPECS = {
     ],
     mounts: {
       head: { x: 1.25, y: 1.05, z: 6.02, glowZ: 6.12, aimX: 0.8 },
-      far: { y: 2.98, z: 4.1 },
+      far: { y: 2.98, z: 4.3 }, // just proud of the roof bar's lens (4.26)
       cab: { y: 2.3, z: 3.6 },
-      marker: { x: 1.99, y: 1.2, z: 0.6 },
+      marker: { x: 1.99, y: 1.05, z: -2.0 }, // the middle of the three amber side lamps
     },
   },
   // КОЙОТ: a light buggy. Big tyres out on long arms, a narrow faceted copper body
   // riding high between them, a glass canopy over the nose. Quick and bouncy.
   buggy: {
     id: 'buggy',
+    blurb: 'легкий і стрибучий, довгий хід підвіски, швидкий по горбах',
     name: 'БАГІ 4×4',
     tag: 'легкий баггі · Койот',
     driveLabel: ['4×4', '4×2'],
@@ -207,7 +211,7 @@ const SPECS = {
       head: { x: 0.75, y: 0.2, z: 3.56, glowZ: 3.62, aimX: 0.5 },
       far: { y: 1.46, z: -0.34 }, // roof bar on struts behind the canopy
       cab: { y: 0.5, z: 1.45, k: 0.3 }, // dash glow, low and dim in a small cockpit
-      marker: { x: 1.25, y: 0.2, z: 0 },
+      marker: { x: 1.1, y: 0.35, z: 2.7 }, // the amber strips on the nose flanks
     },
   },
   // СТРІЛА: the fast one. Low, light, open-wheeled, a single-seat canopy, a hotter
@@ -215,6 +219,7 @@ const SPECS = {
   // speed, on shorter, firmer suspension that wants smooth ground.
   speedster: {
     id: 'speedster',
+    blurb: 'найшвидший: притискна сила, широкі задні шини; любить рівну дорогу',
     name: 'СПІДСТЕР 4×4',
     tag: 'швидкісний ровер · Стріла',
     driveLabel: ['4×4', '4×2'],
@@ -249,7 +254,9 @@ const SPECS = {
     // the extra rubber grips harder — the rear bites, so it understeers, not spins.
     rear: { scale: 1.15, width: 1.35, dx: 0.27, mu: 1.2 },
     corner: { topY: 0.22, upY: -0.06, brace: { x: 0.72, y: (z) => (z > 0 ? -0.08 : 0.12) } },
-    tyreFaceX: 2.42, // narrow round-crowned tyres, not the balloons
+    // Per axle: narrow round-crowned fronts, and the wide rears' outer face, which
+    // stands 0.6 m further out (measured off the wheel mesh: 2.50 and 3.08).
+    tyreFaceX: [2.42, 3.0],
     hullGrids: [
       { xs: [-0.8, 0, 0.8], ys: [-0.95], zs: [-3, -1.5, 0, 1.5, 3.3] },
       { xs: [-1.3, 1.3], ys: [-0.3], zs: [-1.2, 0, 1.2] },
@@ -261,7 +268,7 @@ const SPECS = {
       head: { x: 0.5, y: -0.5, z: 3.5, glowZ: 3.62, aimX: 0.4 },
       far: { y: 1.16, z: -0.2 }, // pod on the front of the spine
       cab: { y: 0.1, z: 1.3, k: 0.3 },
-      marker: { x: 1.3, y: -0.4, z: 0 },
+      marker: { x: 1.34, y: -0.7, z: 0.6 }, // the lime pair on the sidepods
     },
   },
 };

@@ -30,6 +30,8 @@ const VERTS_PER_SEG = STRIPS * 6;
 const LANE_OF_VERT = [];
 for (let l = 0; l < STRIPS; l++) LANE_OF_VERT.push(l, l + 1, l, l + 1, l + 1, l);
 
+// `width` is one number for every wheel, or one per wheel for a chassis whose rear
+// tyres are wider than the fronts.
 export function createTracks(wheels = 4, segments = 170, width = 1.05) {
   const total = wheels * segments * VERTS_PER_SEG;
   const pos = new Float32Array(total * 3);
@@ -56,7 +58,7 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
   mesh.receiveShadow = true;
   mesh.renderOrder = 1;
 
-  const half = width / 2;
+  const halves = Array.from({ length: wheels }, (_, w) => (Array.isArray(width) ? width[w] : width) / 2);
   const head = new Int32Array(wheels);
   const filled = new Int32Array(wheels);
   const last = Array.from({ length: wheels }, () => ({ x: 0, z: 0, has: false }));
@@ -69,6 +71,7 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
     const dx = toX - fromX;
     const dz = toZ - fromZ;
     const len = Math.hypot(dx, dz) || 1;
+    const half = halves[w];
     const rx = (dz / len) * half;
     const rz = (-dx / len) * half;
 

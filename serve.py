@@ -1,4 +1,5 @@
 """Static dev server for the games in this folder, with caching disabled."""
+import os
 import sys
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,8 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
+    # An explicit argument wins; otherwise the preview launcher hands us a free port
+    # through PORT, so a second copy never collides with one already on 5173.
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 5173))
     handler = partial(NoCacheHandler, directory=sys.path[0])
     Server(("127.0.0.1", port), handler).serve_forever()

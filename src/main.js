@@ -64,7 +64,13 @@ const CAM_ORBIT_SPEED = 0.15; // rad/s, slow reveal, not a spin
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 // 2x on a Retina panel means 4x the fragments for a full-screen terrain; 1.5 keeps
 // the image sharp at a fraction of the fill cost.
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+// Render resolution, pixels per CSS pixel. It was min(devicePixelRatio, 1.5), which
+// on a Retina screen drew 2.25× the pixels of the window through every post pass;
+// 1× is the default now and Графіка → Роздільність trades it back (0.5–1.5×).
+const RENDER_SCALE_KEY = 'rover.renderScale';
+let renderScale = 1;
+try { renderScale = Math.min(1.5, Math.max(0.5, parseFloat(localStorage.getItem(RENDER_SCALE_KEY)) || 1)); } catch (e) { /* storage may be blocked */ }
+renderer.setPixelRatio(renderScale);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -219,7 +225,7 @@ for (const b of BASES) {
   beacons.push({ ...built, x: b.x, z: b.z });
 }
 
-const tracks = createTracks(WHEEL_DEFS.length);
+const tracks = createTracks(WHEEL_DEFS.length, 170, WHEEL_DEFS.map((d) => 1.05 * d.wk));
 const drawSize = new THREE.Vector2();
 const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 }, tail: { on: false, x: 0, y: 0, z: 0 } };
 const roadPosts = createRoadPosts();
@@ -592,12 +598,23 @@ refreshChapter();
 
 // Chassis choice sits beside the planet row: it is garage state, not story state,
 // so it survives a new game and never touches the save.
+// Under the buttons, one line on the machine: what it tops out at, how it drives and
+// what it is like. Hovering a button previews that one; leaving shows yours again.
+const chassisInfo = document.getElementById('chassisInfo');
+function showChassisInfo(c) {
+  const kmh = (v) => Math.round(v * 3.6);
+  const cruise = kmh(c.awdSplit ? c.vMaxRwd ?? 100 / 3.6 : c.vMax);
+  chassisInfo.innerHTML = `<b>${c.tag}</b> · ${c.driveLabel[0]} · ${cruise} км/год, форсаж ${kmh(c.vMaxBoost)}<br>${c.blurb}`;
+}
 for (const c of CHASSIS_LIST) {
   const btn = document.getElementById(`chassis-${c.id}`);
   btn.textContent = c.name;
   btn.classList.toggle('on', c.id === CHASSIS);
   btn.addEventListener('click', () => { if (c.id !== CHASSIS) setChassis(c.id); });
+  btn.addEventListener('pointerenter', () => showChassisInfo(c));
+  btn.addEventListener('pointerleave', () => showChassisInfo(SPEC));
 }
+showChassisInfo(SPEC);
 document.getElementById('startTag').textContent = SPEC.tag;
 
 // ---------- start screen ----------
@@ -1230,7 +1247,7 @@ function frame() {
   // Visual model follows the rigid body.
   {
     const yw = sim.yaw();
-    terrain.update(sim.pos.x, sim.pos.z, 8, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
+    terrain.update(sim.pos.x, sim.pos.z, 3, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
   }
   sim.origin(origin);
   vehicle.root.position.copy(origin);
@@ -1548,15 +1565,28 @@ btnPost.addEventListener('click', () => {
   btnPost.classList.toggle('on', post.enabled);
 });
 
-window.addEventListener('resize', () => {
+function resizeView() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   post.setSize(window.innerWidth, window.innerHeight);
   sunShadows.setSize();
+}
+window.addEventListener('resize', resizeView);
+
+const scaleInput = document.getElementById('renderScale');
+const scaleLabel = document.getElementById('renderScaleV');
+scaleInput.value = renderScale;
+scaleLabel.textContent = `${renderScale}×`;
+scaleInput.addEventListener('input', () => {
+  renderScale = parseFloat(scaleInput.value);
+  scaleLabel.textContent = `${renderScale}×`;
+  try { localStorage.setItem(RENDER_SCALE_KEY, String(renderScale)); } catch (e) { /* storage may be blocked */ }
+  renderer.setPixelRatio(renderScale);
+  resizeView();
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { vehicle, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

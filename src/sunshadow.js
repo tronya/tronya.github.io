@@ -31,6 +31,13 @@ export function createSunShadows(scene, camera, sun, { far = 900 } = {}) {
     l.shadow.bias = -0.0003;
     l.shadow.normalBias = 0.05;
   }
+  // Re-rendering every cascade every frame was the single biggest GPU cost in the
+  // game (~9 ms). Only the near one holds the rover and anything fast; the middle one
+  // is redrawn every 2nd frame and the far one (hills out to the fog) every 3rd. A
+  // skipped cascade keeps its own shadow matrix from when it was drawn, so its
+  // shadows stay put on the ground — only something moving inside it lags a frame.
+  const EVERY = [1, 2, 3];
+  csm.lights.forEach((l, i) => { if (EVERY[i] > 1) l.shadow.autoUpdate = false; });
   // `sun` stays the source of truth for colour, strength and direction (the day/night
   // code already drives it); it just no longer lights anything itself.
   sun.castShadow = false;
@@ -84,7 +91,11 @@ export function createSunShadows(scene, camera, sun, { far = 900 } = {}) {
         l.intensity = sun.intensity;
       }
       csm.update();
-      if (++frame % 30 === 0) adopt();
+      frame++;
+      csm.lights.forEach((l, i) => {
+        if (EVERY[i] > 1 && (frame + i) % EVERY[i] === 0) l.shadow.needsUpdate = true;
+      });
+      if (frame % 30 === 0) adopt();
     },
     setSize() { csm.updateFrustums(); },
   };

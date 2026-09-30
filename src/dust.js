@@ -234,14 +234,15 @@ export function createDustTrail() {
       const sandiness = pebbleDensity(w.cx, w.cz);
       const slip = Math.hypot(w.vx, w.vy);
       const patch = 0.15 + 1.5 * Math.pow(patchNoise(w.cx, w.cz), 2.2);
-      const rate = (speed * 0.72 + slip * 2) * (0.12 + 0.9 * sandiness) * patch;
+      // A wider tyre churns up more of the ground, so it throws more dust.
+      const rate = (speed * 0.72 + slip * 2) * (0.12 + 0.9 * sandiness) * patch * (w.wk || 1);
       if (VACUUM) {
         acc[i] = (acc[i] || 0) + rate * 6 * dt;
         while (acc[i] >= 1) {
           acc[i] -= 1;
           const kick = 0.5 + Math.random() * 0.7;
           spawn(
-            w.cx + (Math.random() - 0.5) * 0.5, w.g + 0.15, w.cz + (Math.random() - 0.5) * 0.5,
+            w.cx + (Math.random() - 0.5) * 0.5 * (w.wk || 1), w.g + 0.15, w.cz + (Math.random() - 0.5) * 0.5 * (w.wk || 1),
             ctx.vx * 0.45 + back.x * (1 + kick * 2) + (Math.random() - 0.5) * 1.4,
             0.7 + Math.random() * 1.8,
             ctx.vz * 0.45 + back.z * (1 + kick * 2) + (Math.random() - 0.5) * 1.4,
@@ -257,7 +258,7 @@ export function createDustTrail() {
         const out = (Math.random() - 0.5) * 2.4 * (0.6 + sandiness);
         const kick = 0.4 + Math.random() * 0.8;
         spawn(
-          w.cx + (Math.random() - 0.5) * 0.5, w.g + 0.15, w.cz + (Math.random() - 0.5) * 0.5,
+          w.cx + (Math.random() - 0.5) * 0.5 * (w.wk || 1), w.g + 0.15, w.cz + (Math.random() - 0.5) * 0.5 * (w.wk || 1),
           ctx.vx * 0.7 + back.x * kick + side.x * out,
           0.3 + Math.random() * 0.7 + slip * 0.15,
           ctx.vz * 0.7 + back.z * kick + side.z * out,
