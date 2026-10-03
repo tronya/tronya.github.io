@@ -1325,10 +1325,14 @@ export function createTerrain(anisotropy = 8) {
   const detailAmt = { value: 1 };
   // Rain (weather.js) soaks the ground: 0 dry .. 1 drenched, driven from main.js.
   const wet = { value: 0 };
+  // Cloud shadows drifting over the ground (main.js moves `off` with the wind).
+  const cloud = { amt: { value: 0 }, off: { value: new THREE.Vector2() } };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.tDetail = { value: detail };
     shader.uniforms.detailAmt = detailAmt;
     shader.uniforms.wet = wet;
+    shader.uniforms.cloudAmt = cloud.amt;
+    shader.uniforms.cloudOff = cloud.off;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vDetailPos;\nvarying vec3 vDetailN;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvDetailPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvDetailN = normalize( mat3( modelMatrix ) * objectNormal );');
@@ -1339,6 +1343,8 @@ varying vec3 vDetailN;
 uniform sampler2D tDetail;
 uniform float detailAmt;
 uniform float wet;
+uniform float cloudAmt;
+uniform vec2 cloudOff;
 // Smooth value noise for where rain pools into puddles.
 float wetHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 float wetNoise( vec2 p ) {
@@ -1380,6 +1386,11 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
            float albedo = max( 0.1, ( 0.2 + 1.6 * d1.g ) * ( 0.62 + 0.76 * d2.g ) );
            diffuseColor.rgb *= mix( 1.0, albedo, min( dNear, 1.0 ) );
            detailDH = vec2( dFdx( h ), dFdy( h ) ) * 0.64 * dNear;
+         }
+         if ( cloudAmt > 0.0 ) {
+           vec2 cp = vDetailPos.xz / 240.0 + cloudOff;
+           float cn = wetNoise( cp ) * 0.6 + wetNoise( cp * 2.3 + 5.1 ) * 0.28 + wetNoise( cp * 5.7 + 1.3 ) * 0.12;
+           diffuseColor.rgb *= 1.0 - cloudAmt * smoothstep( 0.52, 0.7, cn );
          }
          // Soaked: the whole ground darkens, and on flat patches water pools into
          // puddles — darker still, glassy, their bumps smoothed away.
@@ -1667,7 +1678,7 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
     while (queue.length || job) update(x, z, Infinity);
   }
 
-  return { group, update, prime, TILE, GRID, detailAmt, wet };
+  return { group, update, prime, TILE, GRID, detailAmt, wet, cloud };
 }
 
 // Everything placement reads is defined by now; from here on terrainHeight levels

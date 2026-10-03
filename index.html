@@ -200,7 +200,7 @@
         <span id="jobClock"></span>
       </div>
     </div>
-    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.29 · сліди коліс нарешті видно (глибші, на Місяці вічні), бруд на ровері змиває дощ, лакована фарба з відблисками неба</span></div>
+    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.30 · трава мнеться під ровером, тіні хмар, помітніші пилові вихори, Фобос і Деймос, метеори, Чумацький Шлях, пресети графіки, кольоровий тон і зерно</span></div>
   </div>
     <div id="comms" class="panel"><span id="commsFrom"></span><span id="commsText"></span><span id="commsMore"></span></div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="70"></canvas></div>
@@ -277,6 +277,12 @@
 
     <div id="tab-gfx" class="tabBody">
       <div class="secTitle">Графіка</div>
+      <div class="btnRow" id="gfxPresets">
+        <button data-preset="low">Низькі</button>
+        <button data-preset="medium">Середні</button>
+        <button data-preset="high">Високі</button>
+        <button data-preset="ultra">Ультра</button>
+      </div>
       <label><span>Видимість</span><input id="viewDist" type="range" min="50" max="200" value="100"><b id="viewDistV">100%</b></label>
       <label><span>Роздільність</span><input id="renderScale" type="range" min="0.5" max="1.5" step="0.25" value="1"><b id="renderScaleV">1×</b></label>
       <div class="btnRow">

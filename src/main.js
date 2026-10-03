@@ -30,7 +30,7 @@ import { createUpgrades, BRANCHES as UPGRADE_BRANCHES } from './upgrades.js';
 import { createDustTrail } from './dust.js';
 import { createSonar, MAX_BIAS as SONAR_MAX_BIAS } from './sonar.js';
 import { createMinimap3D } from './minimap3d.js';
-import { createSkyMaterial, updateSky, horizonColor, planetOrbit } from './sky.js';
+import { createSkyMaterial, updateSky, horizonColor, planetOrbit, marsMoons } from './sky.js';
 import { createWeather, WEATHER_TEXT } from './weather.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
@@ -254,6 +254,7 @@ const _sunScr = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
 const _shaftCol = new THREE.Color();
 function updateShafts() {
+  marsMoons(sky.material, timeOfDay, performance.now() / 1000);
   if (PLANET === 'moon') return post.setShafts(0.5, 0.5, 0);
   camera.getWorldDirection(_camDir);
   const facing = clamp(_camDir.dot(sunDir) * 1.6 + 0.2, 0, 1);
@@ -1550,6 +1551,14 @@ function frame() {
   weather.update(dt, camera.position, daylight);
   stormW = weather.w;
   weatherLook();
+  // Cloud shadows sliding over the ground: none on the airless Moon, thin wisps on
+  // Mars, real cumulus on Верданта; lost in the murk of a storm.
+  {
+    const CLOUD = { mars: 0.3, verdanta: 0.42 }[PLANET] || 0;
+    terrain.cloud.amt.value = CLOUD * clamp(sunDir.y * 3, 0, 1) * (1 - weather.w);
+    terrain.cloud.off.value.x += dt * 0.0045;
+    terrain.cloud.off.value.y += dt * 0.0025;
+  }
   // The ground soaks up quickly in rain and dries slowly after.
   if (weather.kind === 'rain') {
     const wv = terrain.wet.value;
@@ -1773,6 +1782,7 @@ function frame() {
   }
 
   sand.update(dt, sandCtx);
+  sandCtx.wind = 1 + 3 * weather.w;
   grass.update(dt, sandCtx);
   water.update(dt, sandCtx);
   splash.update(dt, sandCtx);
@@ -1896,7 +1906,38 @@ scaleInput.addEventListener('input', () => {
   resizeView();
 });
 
+// ---------- graphics presets ----------
+// One click sets the whole graphics tab: resolution, view distance, shadows and the
+// post effects. The individual controls still work afterwards; the choice is kept.
+const GFX_PRESETS = {
+  low: { scale: 0.75, view: 70, shadows: false, ao: false, bloom: false, shafts: false, grain: false },
+  medium: { scale: 1, view: 90, shadows: true, ao: false, bloom: true, shafts: true, grain: false },
+  high: { scale: 1, view: 100, shadows: true, ao: true, bloom: true, shafts: true, grain: true },
+  ultra: { scale: 1.25, view: 140, shadows: true, ao: true, bloom: true, shafts: true, grain: true },
+};
+const presetBtns = [...document.querySelectorAll('#gfxPresets button')];
+function applyPreset(id) {
+  const p = GFX_PRESETS[id];
+  if (!p) return;
+  scaleInput.value = p.scale;
+  scaleInput.dispatchEvent(new Event('input'));
+  const view = document.getElementById('viewDist');
+  view.value = p.view;
+  view.dispatchEvent(new Event('input'));
+  if (renderer.shadowMap.enabled !== p.shadows) btnShadows.click();
+  if (!post.enabled) btnPost.click();
+  Object.assign(post.settings, { ao: p.ao, bloom: p.bloom, shafts: p.shafts, grain: p.grain });
+  for (const b of presetBtns) b.classList.toggle('on', b.dataset.preset === id);
+  try { localStorage.setItem('rover.gfx', id); } catch (e) { /* storage may be blocked */ }
+}
+for (const b of presetBtns) b.addEventListener('click', () => applyPreset(b.dataset.preset));
+try {
+  const saved = localStorage.getItem('rover.gfx');
+  if (saved) applyPreset(saved);
+  else presetBtns.find((b) => b.dataset.preset === 'high')?.classList.add('on');
+} catch (e) { /* storage may be blocked */ }
+
 // debug hook: inspect state and scrub the sol from the console
-window.game = { dirt, tracks, weather, contactShadow, vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { applyPreset, dirt, tracks, weather, contactShadow, vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

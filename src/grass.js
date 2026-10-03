@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { surfaceHeight, vegetationAmount } from './terrain.js';
 import { PLANET } from './planet.js';
+import { SPEC } from './chassis.js';
 
 // Little round bushes on Верданта's moss banks. Cheap on purpose: a small fixed
 // pool of crossed billboard cards (two quads at 90°, like classic foliage-card
@@ -128,6 +129,13 @@ export function createGrass({ count = COUNT, radius = RADIUS } = {}) {
   const rover = { value: new THREE.Vector3() };
   const radiusU = { value: radius };
   const timeU = { value: 0 };
+  const windU = { value: 1 }; // 1 calm .. ~4 in a downpour (weather.js)
+  // Per tuft: which way it was pushed over (world x, z) and how flat it still is.
+  // The rover lays down whatever it drives over; it stands back up over half a
+  // minute or so, so a track through the meadow lingers behind you.
+  const bend = new Float32Array(count * 3);
+  const bendAttr = new THREE.InstancedBufferAttribute(bend, 3);
+  bendAttr.setUsage(THREE.DynamicDrawUsage);
   // Standard, not Lambert, and this matters more than it looks: almost all of
   // Верданта's daylight arrives as image-based light from the sky probe
   // (scene.environment, see main.js), which Standard materials gather and Lambert
@@ -145,13 +153,16 @@ export function createGrass({ count = COUNT, radius = RADIUS } = {}) {
     shader.uniforms.uRover = rover;
     shader.uniforms.uRadius = radiusU;
     shader.uniforms.uTime = timeU;
+    shader.uniforms.uWind = windU;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
          uniform vec3 uRover;
          uniform float uRadius;
-         uniform float uTime;`
+         uniform float uTime;
+         uniform float uWind;
+         attribute vec3 bend;`
       )
       .replace(
         '#include <begin_vertex>',
@@ -165,13 +176,26 @@ export function createGrass({ count = COUNT, radius = RADIUS } = {}) {
            // A gentle travelling sway: phased by world position so it reads as wind
            // crossing the field rather than every bush wobbling in lockstep. A round
            // clump is stiffer than a blade of grass, so this stays subtle.
-           float sway = sin(uTime * 1.4 - (instP.x + instP.z) * 0.08);
-           transformed.x += sway * 0.05 * transformed.y;
-           transformed.z += cos(uTime * 1.1 - (instP.x - instP.z) * 0.08) * 0.035 * transformed.y;
+           float sway = sin(uTime * 1.4 * (0.7 + 0.3 * uWind) - (instP.x + instP.z) * 0.08);
+           float flat0 = bend.z;
+           float stiff = 1.0 - 0.8 * flat0;
+           transformed.x += sway * 0.05 * uWind * stiff * transformed.y;
+           transformed.z += cos(uTime * 1.1 * (0.7 + 0.3 * uWind) - (instP.x - instP.z) * 0.08) * 0.035 * uWind * stiff * transformed.y;
+           // Laid over: the push direction is in world space, so bring it into the
+           // tuft's own (rotated, scaled) frame before leaning the card along it.
+           if (flat0 > 0.001) {
+             vec3 ld = transpose(mat3(instanceMatrix)) * vec3(bend.x, 0.0, bend.y);
+             ld.y = 0.0;
+             float ll = length(ld);
+             if (ll > 1e-4) ld /= ll;
+             transformed.xz += ld.xz * flat0 * transformed.y * 0.95;
+             transformed.y *= 1.0 - 0.72 * flat0;
+           }
          #endif`
       );
   };
 
+  geometry.setAttribute('bend', bendAttr);
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled = false;
@@ -221,6 +245,7 @@ export function createGrass({ count = COUNT, radius = RADIUS } = {}) {
     pos[o + 1] = surfaceHeight(bestX, bestZ) - 0.03; // sink the root slightly so no gap shows on slopes
     pos[o + 2] = bestZ;
     yaw[i] = Math.random() * Math.PI * 2;
+    bend[i * 3 + 2] = 0;
     size[i * 2] = 0.42 + Math.random() * 0.3;
     size[i * 2 + 1] = 0.34 + Math.random() * 0.3;
     on[i] = bestV > 0.12 && Math.random() < bestV ? 1 : 0;
@@ -259,6 +284,40 @@ export function createGrass({ count = COUNT, radius = RADIUS } = {}) {
       colorDirty = false;
     }
     rover.value.set(ctx.x, 0, ctx.z);
+    windU.value = ctx.wind ?? 1;
+
+    // Flatten what's under the rover; let the rest spring back.
+    const cy = Math.cos(ctx.yaw);
+    const sy = Math.sin(ctx.yaw);
+    const hw = SPEC.box.w / 2 + 0.5;
+    const hl = SPEC.box.l / 2 + 0.7;
+    const reach2 = (hw + hl) * (hw + hl);
+    const recover = dt / 30;
+    let bent = false;
+    for (let i = 0; i < count; i++) {
+      const b = i * 3;
+      if (!on[i]) continue;
+      const dx = pos[b] - ctx.x;
+      const dz = pos[b + 2] - ctx.z;
+      if (dx * dx + dz * dz < reach2) {
+        const lx = dx * cy - dz * sy; // across the rover
+        const lz = dx * sy + dz * cy; // along it
+        if (Math.abs(lx) < hw && Math.abs(lz) < hl) {
+          // Pushed forward and out to the side it was on.
+          const out = Math.sign(lx || 1) * 0.6;
+          bend[b] = sy + out * cy;
+          bend[b + 1] = cy - out * sy;
+          bend[b + 2] = 1;
+          bent = true;
+          continue;
+        }
+      }
+      if (bend[b + 2] > 0) {
+        bend[b + 2] = Math.max(0, bend[b + 2] - recover);
+        bent = true;
+      }
+    }
+    if (bent) bendAttr.needsUpdate = true;
   }
 
   return { group, update, count };

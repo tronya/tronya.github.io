@@ -96,7 +96,7 @@ function cloud(count, mat) {
 
 // ---------- Mars: dust devils ----------
 const DEVILS = 3;
-const PER_DEVIL = 700;
+const PER_DEVIL = 1300;
 const DEVIL_PUSH_R = 14; // m — inside this the column shoves the rover round
 
 function devilMaterial(color) {
@@ -125,15 +125,19 @@ function devilMaterial(color) {
         if (i == 2) { d = devils[2]; s = shape[2]; }
         float h = fract(seed.y + time * 0.05 * seed.w);        // grains climb, then recycle
         float hh = pow(h, 1.35);
-        float r = mix(1.8, s.y, pow(h, 1.4)) * seed.z;
+        // A wide skirt of dust kicked up round the foot, then the funnel.
+        float skirt = 1.0 - smoothstep(0.0, 0.14, h);
+        float r = (mix(1.8, s.y, pow(h, 1.4)) + skirt * 5.5 * seed.w) * seed.z;
         float a = seed.x + time * s.z * (1.6 - h) * seed.w;     // spins faster low down
         vec2 lean = vec2(sin(time * 0.3 + hh * 2.5), cos(time * 0.23 + hh * 2.0)) * hh * s.w;
         vec3 p = vec3(d.x + cos(a) * r + lean.x, d.y + hh * s.x, d.z + sin(a) * r + lean.y);
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mv;
-        float sizeM = mix(1.6, 6.5, h) * seed.z;
+        float sizeM = mix(1.6, 6.5, h) * seed.z * (1.0 + skirt * 0.8);
         gl_PointSize = clamp(sizeM * scale / -mv.z, 0.0, 128.0);
-        vA = d.w * smoothstep(0.0, 0.06, h) * pow(1.0 - h, 0.8) * 0.3 * (1.0 - smoothstep(900.0, 1300.0, -mv.z));
+        // Spiral bands that travel round with the spin, so the eye can see it turn.
+        float bandsA = 0.45 + 0.55 * smoothstep(-0.2, 0.8, sin(a * 2.0 - hh * 9.0));
+        vA = d.w * smoothstep(0.0, 0.03, h) * pow(1.0 - h, 0.7) * 0.42 * bandsA * (1.0 - smoothstep(900.0, 1300.0, -mv.z));
       }
     `,
     fragmentShader: /* glsl */ `

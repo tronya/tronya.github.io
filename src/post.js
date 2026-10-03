@@ -27,10 +27,13 @@ import { PLANET } from './planet.js';
 
 // Display-space grade: a little saturation and a warm/cool split per planet, plus a
 // soft vignette. Deliberately small — the lighting already carries each planet's look.
+// `curve` is how much of a soft S-curve to apply (contrast without crushing).
+// Mars: cooler shadows against warm light, the classic dusty-desert split. Moon:
+// stark, neutral, hard. Верданта: soft, damp, greens kept rich.
 const GRADE = {
-  mars: { sat: 1.08, shadow: [1.03, 0.99, 0.95], high: [1.0, 0.98, 0.95], vignette: 0.28 },
-  moon: { sat: 0.85, shadow: [0.97, 0.99, 1.04], high: [1.0, 1.0, 1.0], vignette: 0.34 },
-  verdanta: { sat: 1.06, shadow: [0.96, 1.01, 1.03], high: [1.02, 1.01, 0.97], vignette: 0.24 },
+  mars: { sat: 1.1, shadow: [0.97, 0.99, 1.03], high: [1.04, 0.99, 0.93], vignette: 0.3, curve: 0.22 },
+  moon: { sat: 0.82, shadow: [0.96, 0.99, 1.05], high: [1.0, 1.0, 0.99], vignette: 0.36, curve: 0.32 },
+  verdanta: { sat: 1.08, shadow: [0.95, 1.01, 1.04], high: [1.02, 1.02, 0.96], vignette: 0.26, curve: 0.15 },
 };
 
 const finalMaterial = new THREE.ShaderMaterial({
@@ -46,6 +49,9 @@ const finalMaterial = new THREE.ShaderMaterial({
     aspect: { value: 1 },
     texel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
     tShaft: { value: null },
+    curve: { value: 0 },
+    grain: { value: 0.035 },
+    time: { value: 0 },
     shaftAmount: { value: 0 },
     shaftColor: { value: new THREE.Color(1, 0.9, 0.75) },
   },
@@ -65,6 +71,9 @@ const finalMaterial = new THREE.ShaderMaterial({
     uniform float vignette;
     uniform float aspect;
     uniform sampler2D tShaft;
+    uniform float curve;
+    uniform float grain;
+    uniform float time;
     uniform float shaftAmount;
     uniform vec3 shaftColor;
     varying vec2 vUv;
@@ -106,8 +115,16 @@ const finalMaterial = new THREE.ShaderMaterial({
         float sh = texture2D(tShaft, vUv).r * shaftAmount;
         c += shaftColor * sh * (1.0 - c * 0.6); // screen-ish: never blows the sky out
       }
+      c = clamp(c, 0.0, 1.0);
+      c = mix(c, c * c * (3.0 - 2.0 * c), curve);
       vec2 d = (vUv - 0.5) * vec2(aspect, 1.0);
       c *= 1.0 - vignette * smoothstep(0.35, 1.05, length(d) * 1.25);
+      // Fine film grain, strongest in the mid-tones, fresh every frame.
+      if (grain > 0.0) {
+        float gn = fract(sin(dot(gl_FragCoord.xy + fract(time * 7.13) * 117.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+        float lg = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c += gn * grain * (1.0 - abs(lg * 2.0 - 1.0) * 0.7);
+      }
       gl_FragColor = vec4(c, 1.0);
     }
   `,
@@ -223,6 +240,7 @@ export function createPost(renderer, scene, camera) {
   U.shadowTint.value.set(...g.shadow);
   U.highTint.value.set(...g.high);
   U.vignette.value = g.vignette;
+  U.curve.value = g.curve;
   U.tScene.value = sceneRT.texture;
   const aoFadeRT = new THREE.WebGLRenderTarget(Math.round(size.x / 2), Math.round(size.y / 2), { type: THREE.HalfFloatType });
   aoFadeMaterial.uniforms.tAO.value = ao.pdRenderTarget.texture;
@@ -299,7 +317,7 @@ export function createPost(renderer, scene, camera) {
   }
 
   let enabled = true;
-  const settings = { ao: true, bloom: true };
+  const settings = { ao: true, bloom: true, shafts: true, grain: true };
   return {
     get enabled() { return enabled; },
     setEnabled(on) { enabled = on; },
@@ -341,8 +359,11 @@ export function createPost(renderer, scene, camera) {
       renderer.shadowMap.autoUpdate = autoShadow;
       camera.layers.mask = mask;
       if (settings.bloom) renderBloom();
-      U.shaftAmount.value = shaftAmt;
-      if (shaftAmt > 0.005) {
+      const sAmt = settings.shafts ? shaftAmt : 0;
+      U.shaftAmount.value = sAmt;
+      U.grain.value = settings.grain ? 0.035 : 0;
+      U.time.value = performance.now() / 1000;
+      if (sAmt > 0.005) {
         renderer.setRenderTarget(shaftRT);
         shaftQuad.render(renderer);
       }

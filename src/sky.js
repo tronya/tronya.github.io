@@ -113,6 +113,12 @@ export function createSkyMaterial() {
       // Weather (weather.js): a dust storm or rain cloud smothering the whole dome.
       haze: { value: 0 },
       hazeColor: { value: new THREE.Color() },
+      // Night sky extras: time for the meteors, and Mars's two little moons
+      // (xyz direction, w angular radius; w = 0 hides one).
+      time: { value: 0 },
+      meteors: { value: PLANET === 'verdanta' ? 0 : 1 },
+      moonA: { value: new THREE.Vector4(0, 1, 0, 0) },
+      moonB: { value: new THREE.Vector4(0, 1, 0, 0) },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -144,7 +150,12 @@ export function createSkyMaterial() {
       uniform float planetGlow;
       uniform float haze;
       uniform vec3 hazeColor;
+      uniform float time;
+      uniform float meteors;
+      uniform vec4 moonA;
+      uniform vec4 moonB;
       varying vec3 vDir;
+
 
       // Ring span, in planet radii.
       const float RING_IN = 1.35;
@@ -178,6 +189,25 @@ export function createSkyMaterial() {
         return s;
       }
 
+      vec3 hash33(float n) {
+        return fract(sin(vec3(n, n + 1.7, n + 3.1) * vec3(43758.5453, 22578.1459, 19642.3490)));
+      }
+      // A small potato of a moon: lit sphere with a rough, cratered face.
+      vec4 littleMoon(vec3 d, vec4 m, vec3 sunD, float seed) {
+        if (m.w <= 0.0) return vec4(0.0);
+        vec3 md = normalize(m.xyz);
+        float c = dot(d, md);
+        float sr = sin(m.w);
+        vec3 off = (d - md * c) / sr;
+        float r2 = dot(off, off);
+        if (c < 0.0 || r2 > 1.0) return vec4(0.0);
+        vec3 n = normalize(off - md * sqrt(1.0 - r2));
+        float lit = clamp(dot(n, sunD) * 1.1, 0.0, 1.0);
+        float rough = 0.75 + 0.25 * hash31(floor(off * 9.0 + seed) + seed);
+        vec3 surf = vec3(0.62, 0.55, 0.48) * rough * (0.03 + lit);
+        return vec4(surf, smoothstep(1.0, 0.85, r2));
+      }
+
       // How much ring material a sight-line crosses at radius rho (planet radii):
       // broad bands, a couple of clean gaps, and soft inner and outer edges.
       float ringDensity(float rho) {
@@ -201,10 +231,42 @@ export function createSkyMaterial() {
           vec3 f = fract(sp) - 0.5;
           float r = hash31(id);
           float star = step(0.975, r) * smoothstep(0.32, 0.0, length(f));
-          float band = exp(-pow(dot(d, normalize(vec3(0.3, 0.8, 0.5))) * 4.0, 2.0)) * 0.035;
+          // The Milky Way: a broad band, mottled with dust lanes and thick with
+          // faint stars, brighter towards its core.
+          vec3 gAxis = normalize(vec3(0.3, 0.8, 0.5));
+          float gl = dot(d, gAxis);
+          float core = 0.6 + 0.4 * max(dot(d, normalize(vec3(0.9, 0.1, -0.4))), 0.0);
+          float lanes = smoothstep(0.25, 0.75, fbm3(d * 9.0 + 3.0)) * (1.0 - 0.7 * smoothstep(0.45, 0.7, fbm3(d * 22.0)));
+          float band = exp(-pow(gl * 3.2, 2.0)) * (0.03 + 0.07 * lanes) * core;
+          float dense = step(0.965, hash31(floor(d * 420.0))) * exp(-pow(gl * 3.4, 2.0)) * 0.22;
           float up = smoothstep(0.02, 0.3, d.y);
-          col += stars * up * (star * (0.35 + 0.65 * r) * vec3(0.85, 0.9, 1.0) + band * vec3(0.5, 0.6, 1.0));
+          col += stars * up * (star * (0.35 + 0.65 * r) * vec3(0.85, 0.9, 1.0) + band * vec3(0.55, 0.62, 1.0) + dense * vec3(0.8, 0.85, 1.0));
+
+          // Now and then a meteor: a short bright streak across a random patch of sky.
+          if (meteors > 0.0) {
+            float period = 7.0;
+            float k = floor(time / period);
+            float tt = time - k * period;
+            if (tt < 0.9) {
+              vec3 h = hash33(k);
+              vec3 start = normalize(vec3(h.x * 2.0 - 1.0, 0.45 + h.y * 0.5, h.z * 2.0 - 1.0));
+              vec3 dir = normalize(cross(start, normalize(vec3(h.z - 0.5, 0.2, h.x - 0.5))));
+              vec3 head = normalize(start + dir * tt * 0.4);
+              vec3 tail = normalize(start + dir * max(0.0, tt * 0.4 - 0.12));
+              vec3 ab = head - tail;
+              float u = clamp(dot(d - tail, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+              float dist = length(d - (tail + ab * u));
+              float fade = sin(tt / 0.9 * 3.14159);
+              col += stars * up * vec3(1.0, 0.95, 0.85) * smoothstep(0.0025, 0.0, dist) * u * u * fade * 1.6;
+            }
+          }
         }
+
+        // Phobos and Deimos (Mars only; zero radius elsewhere hides them).
+        vec4 mA = littleMoon(d, moonA, sunDir, 3.0);
+        col = mix(col, mA.rgb, mA.a);
+        vec4 mB = littleMoon(d, moonB, sunDir, 7.0);
+        col = mix(col, mB.rgb, mB.a);
 
         float s = max(dot(d, sunDir), 0.0);
         col += tint * (pow(s, 6.0) * glow + pow(s, 60.0) * core);
@@ -350,6 +412,27 @@ _pBit.crossVectors(_pDir, _pTan).normalize();
 // disappears into a line, and neither looks like a planet.
 const _pAxis = new THREE.Vector3(0.2, 0.9, 0.35).normalize();
 const _planet = { dir: _pDir, tangent: _pTan, bitangent: _pBit, axis: _pAxis, spin: 0 };
+// Mars's moons: Phobos races round in under a third of a sol, rising in the west;
+// Deimos crawls the other way and hangs up there for days. Both orbit near the
+// equator, here a tilted great circle. Drawn a few times their true size, or they
+// would be single pixels.
+const _mAxis = new THREE.Vector3(0.25, 0.25, 1).normalize();
+const _mU = new THREE.Vector3(1, 0, -0.25).normalize();
+const _mV = new THREE.Vector3().crossVectors(_mAxis, _mU).normalize();
+export function marsMoons(material, timeOfDay, time) {
+  const u = material.uniforms;
+  u.time.value = time;
+  if (PLANET !== 'mars') return;
+  const a = -timeOfDay * Math.PI * 2 * 3.2 + 1.1; // Phobos, retrograde as seen
+  const b = timeOfDay * Math.PI * 2 * 0.25 + 2.4; // Deimos
+  const dA = _mU.clone().multiplyScalar(Math.cos(a)).addScaledVector(_mV, Math.sin(a));
+  const dB = _mU.clone().multiplyScalar(Math.cos(b)).addScaledVector(_mV, Math.sin(b));
+  dB.y = Math.abs(dB.y) * 0.7 + 0.15;
+  dB.normalize();
+  u.moonA.value.set(dA.x, dA.y, dA.z, 0.016);
+  u.moonB.value.set(dB.x, dB.y, dB.z, 0.008);
+}
+
 export function planetOrbit(timeOfDay) {
   // One turn per sol. It is the only thing in that sky that moves, and a world you can
   // watch turning is worth the one cosine it costs.
