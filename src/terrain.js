@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PLANET } from './planet.js';
+import { LANDMARK_TYPES, settlementLayout, SETTLEMENT_R } from './landmark-types.js';
 
 // A ~10 km crossing between two bases. The world is far too large for one mesh, so
 // the ground is analytic (terrainHeight) and the visuals are streamed as tiles that
@@ -137,6 +138,18 @@ export const BASES = [
   { name: 'БЕТА', x: ROUTE_PTS[ROUTE_PTS.length - 1].x, z: ROUTE_PTS[ROUTE_PTS.length - 1].z },
 ];
 export const BASE_FLAT_R = 95;
+
+// Верданта's seed lab parks beside АЛЬФА, off to one side of where the road leaves
+// it — still on the base's flattened pad. Defined here (seeds.js re-exports it) so
+// its walls can join the landmark solids below without an import cycle.
+export const LAB = (() => {
+  const a = ROUTE_PTS[0];
+  const b = ROUTE_PTS[Math.min(8, ROUTE_PTS.length - 1)];
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const fx = (b.x - a.x) / len;
+  const fz = (b.z - a.z) / len;
+  return { name: 'ЛАБОРАТОРІЯ', x: BASES[0].x - fz * 58 - fx * 12, z: BASES[0].z + fx * 58 - fz * 12 };
+})();
 
 export const ROUTE_BOUNDS = (() => {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -472,8 +485,8 @@ function verdantaHeight(x, z) {
 }
 
 // A graded road across rough country: gentle along the road, hilly, cratered and
-// strewn with boulders once you leave it.
-export function terrainHeight(x, z) {
+// strewn with boulders once you leave it. Raw: before landmarks level their ground.
+function rawTerrainHeight(x, z) {
   if (PLANET === 'moon') return moonHeight(x, z);
   if (PLANET === 'verdanta') return verdantaHeight(x, z);
   const rd = roadDist(x, z);
@@ -518,6 +531,340 @@ export function terrainHeight(x, z) {
   return (h + mid + bumpy + small) * flat;
 }
 
+// ---------- landmarks: buildings and wrecks out in the wilds ----------
+// Each planet scatters its own set (see landmark-types.js) across the country off
+// the road. Here they are only data: where each stands, the ground it levels to
+// stand on, and its solid shapes, which groundHeight below folds in so the rover
+// meets a wall the same way it meets a boulder. landmarks.js draws them.
+//
+// Placed lazily, on first use: terrainHeight is already called while this module
+// is still loading (the road field, craters), long before everything placement
+// reads exists. Until `lmArmed` is set at the bottom of the file the plain height is
+// used. `var`, not `let`, so an early read sees undefined instead of throwing.
+var lmArmed;
+var lmList = null;
+var lmGrid = null;
+const LM_CELL = 160;
+const lmKey = (i, j) => i * 65536 + j;
+
+function initLandmarks() {
+  lmList = [];
+  lmGrid = new Map();
+  for (const b of BASES) addSolidSite(BASE_SOLIDS, b.x, b.z);
+  if (PLANET === 'verdanta') addSolidSite(LAB_SOLIDS, LAB.x, LAB.z);
+  if (PLANET === 'mars') placeSettlement();
+  const types = LANDMARK_TYPES[PLANET] || [];
+  if (!types.length) return;
+  let seed = PLANET === 'moon' ? 7331 : PLANET === 'verdanta' ? 4242 : 9001;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const totalW = types.reduce((n, t) => n + t.weight, 0);
+  const pickType = () => {
+    let r = rand() * totalW;
+    for (const t of types) if ((r -= t.weight) < 0) return t;
+    return types[types.length - 1];
+  };
+  const PAD = 650;
+  const cands = [];
+  for (let z = ROUTE_BOUNDS.z0 - PAD; z <= ROUTE_BOUNDS.z1 + PAD; z += 95) {
+    for (let x = ROUTE_BOUNDS.x0 - PAD; x <= ROUTE_BOUNDS.x1 + PAD; x += 95) {
+      cands.push({ x: x + (rand() - 0.5) * 60, z: z + (rand() - 0.5) * 60, o: rand() });
+    }
+  }
+  cands.sort((a, b) => a.o - b.o);
+  const TARGET = 42 + lmList.length; // the base sites are already in the list
+  const SEP = 320;
+  for (const c of cands) {
+    if (lmList.length >= TARGET) break;
+    // Off the road and its shoulders (mission crates and мотлох lie in that band),
+    // clear of both bases.
+    if (roadDist(c.x, c.z) < 230) continue;
+    if (BASES.some((b) => Math.hypot(c.x - b.x, c.z - b.z) < 360)) continue;
+    if (lmList.some((l) => !l.hidden && Math.hypot(c.x - l.x, c.z - l.z) < Math.max(SEP, l.R + 60))) continue;
+    const type = pickType();
+    // Fairly level ground, and no river underfoot.
+    let lo = Infinity, hi = -Infinity, sum = 0, wet = false;
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      const rr = k === 8 ? 0 : type.r;
+      const px = c.x + Math.cos(a) * rr;
+      const pz = c.z + Math.sin(a) * rr;
+      const h = rawTerrainHeight(px, pz);
+      lo = Math.min(lo, h);
+      hi = Math.max(hi, h);
+      sum += h;
+      if (riverDepthAt(px, pz) > 0) wet = true;
+    }
+    if (wet || hi - lo > type.r * 0.32) continue;
+    const yaw = rand() * Math.PI * 2;
+    const lm = {
+      type, x: c.x, z: c.z, y: sum / 9, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw),
+      r: type.r, R: type.r * 1.7 + 12,
+    };
+    lmList.push(lm);
+    const i0 = Math.floor((lm.x - lm.R) / LM_CELL);
+    const i1 = Math.floor((lm.x + lm.R) / LM_CELL);
+    const j0 = Math.floor((lm.z - lm.R) / LM_CELL);
+    const j1 = Math.floor((lm.z + lm.R) / LM_CELL);
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        const key = lmKey(i, j);
+        if (!lmGrid.has(key)) lmGrid.set(key, []);
+        lmGrid.get(key).push(lm);
+      }
+    }
+  }
+}
+
+// The bases' own buildings (base.js) and Верданта's lab (seeds.js) are solid too —
+// they used to be drive-through. They join the same grid, but level no ground
+// (their pads are flattened already) and draw nothing here.
+const tubeAlong = (ax, az, bx, bz, r, h) => {
+  const out = [];
+  for (let k = 1; k <= 5; k++) {
+    const t = k / 6;
+    out.push({ k: 'cyl', x: ax + (bx - ax) * t, z: az + (bz - az) * t, r, h });
+  }
+  return out;
+};
+const BASE_SOLIDS = {
+  name: 'База', id: 'base', colliders: [
+    { k: 'dome', x: -12, z: -8, r: 8, h: 8 },
+    { k: 'dome', x: 10, z: -12, r: 6, h: 6 },
+    { k: 'dome', x: 4, z: 10, r: 7, h: 7 },
+    ...tubeAlong(-12, -8, 4, 10, 2.2, 4.6),
+    ...tubeAlong(10, -12, 4, 10, 2.2, 4.6),
+    { k: 'cyl', x: 18, z: 6, r: 0.8, h: 34 },
+    ...[0, 1, 2, 3, 4, 5].map((i) => ({ k: 'cyl', x: -30, z: -18 + i * 7.5, r: 0.4, h: 3.3 })),
+  ],
+};
+const LAB_SOLIDS = {
+  name: 'Лабораторія', id: 'lab', colliders: [
+    { k: 'cyl', x: -5, z: 0, r: 3.9, h: 6.5 },
+    { k: 'box', x: 7, z: 2, w: 6.2, d: 9.2, h: 3.2 },
+    { k: 'cyl', x: 2, z: -6, r: 0.25, h: 12 },
+  ],
+};
+function addSolidSite(type, x, z) {
+  const lm = { type, x, z, y: rawTerrainHeight(x, z), yaw: 0, cos: 1, sin: 0, r: 0, R: 45, hidden: true };
+  lmList.push(lm);
+  for (let i = Math.floor((x - lm.R) / LM_CELL); i <= Math.floor((x + lm.R) / LM_CELL); i++) {
+    for (let j = Math.floor((z - lm.R) / LM_CELL); j <= Math.floor((z + lm.R) / LM_CELL); j++) {
+      const key = lmKey(i, j);
+      if (!lmGrid.has(key)) lmGrid.set(key, []);
+      lmGrid.get(key).push(lm);
+    }
+  }
+}
+
+// Mars's town, «Обрій» (layout in landmark-types.js): beside the road about halfway
+// along, on whichever side the ground is calmer, its main street turned to face
+// the road. It is a landmark like any other to the rest of the code, just a big one.
+function placeSettlement() {
+  const L = settlementLayout();
+  const k = Math.floor(ROUTE_PTS.length * 0.42);
+  const a = ROUTE_PTS[k];
+  const b = ROUTE_PTS[Math.min(k + 4, ROUTE_PTS.length - 1)];
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const nx = -(b.z - a.z) / len;
+  const nz = (b.x - a.x) / len;
+  let best = null;
+  for (const side of [1, -1]) {
+    const x = a.x + nx * side * 340;
+    const z = a.z + nz * side * 340;
+    let lo = Infinity, hi = -Infinity, sum = 0;
+    for (let i = 0; i < 13; i++) {
+      const ang = (i / 12) * Math.PI * 2;
+      const rr = i === 12 ? 0 : SETTLEMENT_R;
+      const h = rawTerrainHeight(x + Math.cos(ang) * rr, z + Math.sin(ang) * rr);
+      lo = Math.min(lo, h); hi = Math.max(hi, h); sum += h;
+    }
+    if (!best || hi - lo < best.spread) best = { x, z, side, spread: hi - lo, y: sum / 13 };
+  }
+  // Local +z (the main street) runs toward the road.
+  const yaw = Math.atan2(-nx * best.side, -nz * best.side);
+  const lm = {
+    type: { id: 'settlement', name: 'Поселення «Обрій»', r: SETTLEMENT_R, colliders: L.solids },
+    layout: L, x: best.x, z: best.z, y: best.y, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw),
+    r: SETTLEMENT_R, R: SETTLEMENT_R * 1.25 + 24,
+  };
+  lmList.push(lm);
+  for (let i = Math.floor((lm.x - lm.R) / LM_CELL); i <= Math.floor((lm.x + lm.R) / LM_CELL); i++) {
+    for (let j = Math.floor((lm.z - lm.R) / LM_CELL); j <= Math.floor((lm.z + lm.R) / LM_CELL); j++) {
+      const key = lmKey(i, j);
+      if (!lmGrid.has(key)) lmGrid.set(key, []);
+      lmGrid.get(key).push(lm);
+    }
+  }
+}
+
+// How worn the ground is by the town's traffic at (x, z), 0..1: the two streets and
+// the plaza, with soft, noisy edges so they read as trodden dirt, not a laid surface.
+var townLm;
+function townWear(x, z) {
+  if (!lmArmed) return 0;
+  if (townLm === undefined) townLm = getSettlement();
+  if (!townLm) return 0;
+  const dx = x - townLm.x;
+  const dz = z - townLm.z;
+  if (dx * dx + dz * dz > 120 * 120) return 0;
+  const lx = Math.abs(dx * townLm.cos - dz * townLm.sin);
+  const lz = Math.abs(dx * townLm.sin + dz * townLm.cos);
+  const ragged = (fbm(x * 0.12 + 31, z * 0.12 - 7, 2) - 0.5) * 3;
+  const main = (1 - smooth(2 + ragged, 7.5 + ragged, lx)) * (1 - smooth(84, 98, lz));
+  const cross = (1 - smooth(2 + ragged, 7 + ragged, lz)) * (1 - smooth(84, 98, lx));
+  const plaza = 1 - smooth(9 + ragged, 20 + ragged, Math.hypot(lx, lz));
+  const w = Math.max(main, cross, plaza);
+  return w * (0.55 + 0.25 * fbm(x * 0.05 + 3, z * 0.05 + 9, 2));
+}
+
+// The town, if this planet has one (null otherwise).
+export function getSettlement() {
+  if (!lmGrid) initLandmarks();
+  return lmList.find((l) => l.type.id === 'settlement') || null;
+}
+
+const LM_NONE = [];
+function lmAt(x, z) {
+  if (!lmGrid) initLandmarks();
+  return lmGrid.get(lmKey(Math.floor(x / LM_CELL), Math.floor(z / LM_CELL))) || LM_NONE;
+}
+
+// Every landmark on this planet, for landmarks.js to draw (not the base sites).
+export function getLandmarks() {
+  if (!lmGrid) initLandmarks();
+  return lmList.filter((l) => !l.hidden);
+}
+
+// True when (x, z) is within `pad` metres of a landmark's levelled ground — used to
+// keep rocks and pickups off building sites.
+export function nearLandmark(x, z, pad = 0) {
+  if (!lmArmed) return false;
+  for (const lm of lmAt(x, z)) if (!lm.hidden && Math.hypot(x - lm.x, z - lm.z) < lm.r + pad) return true;
+  return false;
+}
+
+// Solid walls. Buildings are not part of the ground: driven into, a ground bump
+// gets climbed (the hull is pushed up its slope), which put rovers on rooftops.
+// Instead physics asks whether a hull point is inside a landmark's shapes and, if
+// so, gets the way out — horizontal, so a wall stops the rover rather than lifting
+// it. `out` receives the push-out normal {x, z}; returns the depth, 0 if outside.
+export function landmarkWall(px, py, pz, out) {
+  if (!lmArmed) return 0;
+  let best = moving.length ? movingWall(px, py, pz, out, 0) : 0;
+  for (const lm of lmAt(px, pz)) {
+    const dx = px - lm.x;
+    const dz = pz - lm.z;
+    if (dx * dx + dz * dz > lm.R * lm.R) continue;
+    const ly = py - lm.y;
+    if (ly < -1) continue;
+    // World -> landmark frame (inverse of three.js rotation.y = yaw).
+    const lx = dx * lm.cos - dz * lm.sin;
+    const lz = dx * lm.sin + dz * lm.cos;
+    for (const c of lm.type.colliders) {
+      const ux = lx - c.x;
+      const uz = lz - c.z;
+      let depth = 0;
+      let nx = 0;
+      let nz = 0;
+      if (c.k === 'box') {
+        if (ly > c.h) continue;
+        const ex = c.w / 2 - Math.abs(ux);
+        const ez = c.d / 2 - Math.abs(uz);
+        if (ex <= 0 || ez <= 0) continue;
+        if (ex < ez) { depth = ex; nx = Math.sign(ux) || 1; } else { depth = ez; nz = Math.sign(uz) || 1; }
+      } else {
+        const d = Math.hypot(ux, uz);
+        if (c.k === 'ring') {
+          if (ly > c.h) continue;
+          const off = d - c.r;
+          depth = c.w / 2 - Math.abs(off);
+          if (depth <= 0 || d < 1e-6) continue;
+          const sg = off >= 0 ? 1 : -1;
+          nx = (ux / d) * sg;
+          nz = (uz / d) * sg;
+        } else {
+          if (d >= c.r) continue;
+          // A dome's wall is only as tall as its curve at that radius.
+          const top = c.k === 'dome' ? c.h * Math.sqrt(1 - (d * d) / (c.r * c.r)) : c.h;
+          if (ly > top) continue;
+          depth = c.r - d;
+          if (d < 1e-6) { nx = 1; } else { nx = ux / d; nz = uz / d; }
+        }
+      }
+      if (depth > best) {
+        best = depth;
+        // Landmark frame -> world.
+        out.x = nx * lm.cos + nz * lm.sin;
+        out.z = -nx * lm.sin + nz * lm.cos;
+      }
+    }
+  }
+  return best;
+}
+
+// Things that move — the NPC rovers (npc.js) — as upright boxes {x, z, y, yaw, w,
+// d, h}, refreshed each frame by their owner and tested by landmarkWall too.
+let moving = [];
+export function setMovingSolids(list) {
+  moving = list;
+}
+function movingWall(px, py, pz, out, best) {
+  for (const m of moving) {
+    const dx = px - m.x;
+    const dz = pz - m.z;
+    if (dx * dx + dz * dz > 64) continue;
+    if (py < m.y - 0.5 || py > m.y + m.h) continue;
+    const c = Math.cos(m.yaw);
+    const s = Math.sin(m.yaw);
+    const lx = dx * c - dz * s;
+    const lz = dx * s + dz * c;
+    const ex = m.w / 2 - Math.abs(lx);
+    const ez = m.d / 2 - Math.abs(lz);
+    if (ex <= 0 || ez <= 0) continue;
+    let nx = 0;
+    let nz = 0;
+    let depth;
+    if (ex < ez) { depth = ex; nx = Math.sign(lx) || 1; } else { depth = ez; nz = Math.sign(lz) || 1; }
+    if (depth > best) {
+      best = depth;
+      out.x = nx * c + nz * s;
+      out.z = -nx * s + nz * c;
+    }
+  }
+  return best;
+}
+
+// Thin upright solids (masts, legs) near (x, z), in world space: hull points sit too
+// far apart to catch one, so physics tests these against the rover's box instead.
+const POLE_R = 1.4;
+export function landmarkPoles(x, z, out) {
+  out.length = 0;
+  if (!lmArmed) return out;
+  for (const lm of lmAt(x, z)) {
+    if (Math.hypot(x - lm.x, z - lm.z) > lm.R + 10) continue;
+    for (const c of lm.type.colliders) {
+      if (c.k !== 'cyl' || c.r > POLE_R) continue;
+      out.push({ x: lm.x + c.x * lm.cos + c.z * lm.sin, z: lm.z - c.x * lm.sin + c.z * lm.cos, r: c.r, y0: lm.y, y1: lm.y + c.h });
+    }
+  }
+  return out;
+}
+
+export function terrainHeight(x, z) {
+  let h = rawTerrainHeight(x, z);
+  if (!lmArmed) return h;
+  // Each landmark levels a pad of ground to its own height and blends back out.
+  for (const lm of lmAt(x, z)) {
+    if (lm.hidden) continue;
+    const d = Math.hypot(x - lm.x, z - lm.z);
+    if (d < lm.R) h = lm.y + (h - lm.y) * smooth(lm.r * 0.9, lm.R, d);
+  }
+  return h;
+}
+
 // How thickly loose pebbles lie at a spot, 0..1. Gravel comes in patches a few
 // hundred metres across with clear ground between them, and each patch is itself
 // uneven, so the amount changes as you drive instead of being spread evenly.
@@ -543,6 +890,7 @@ function stoneInCell(ci, cj) {
   const density = Math.min(0.95, (0.12 + 0.72 * smooth(0.42, 0.62, fbm(x * 0.0055 + 300, z * 0.0055 - 60, 2))) * (0.22 + 1.5 * rough));
   if (a > density) return false;
   if (baseFlatten(x, z) < 0.999) return false;
+  if (nearLandmark(x, z, 4)) return false;
   const b = hash(ci + 91, cj + 3);
   const big = b > 0.97 - 0.13 * rough;
   const r = big ? 1.3 + b * 2.2 : 0.35 + b * 1.15;
@@ -855,6 +1203,7 @@ const strata = new THREE.Color(P.strata);
 const pale = new THREE.Color(P.pale);
 const rust = new THREE.Color(P.rust);
 const roadCol = new THREE.Color(P.roadCol);
+const trodden = new THREE.Color(P.roadCol).lerp(new THREE.Color(P.pale), 0.45);
 const mossCol = new THREE.Color(0x5c7a3f);
 const mossLit = new THREE.Color(0x8fab55); // sunlit tops of the thickest cushions
 const waterCol = new THREE.Color(0x2a6570);
@@ -897,6 +1246,10 @@ function groundColorAt(x, z, y, normalY, out) {
   // The graded road is paler, packed dust; off it the ground is darker and rockier.
   const onRoad = 1 - smooth(ROAD_HALF + 14, ROAD_HALF + 170, roadDist(x, z));
   out.lerp(roadCol, onRoad * 0.6);
+  // The town's streets are not paved: just ground packed pale by boots and wheels,
+  // ragged at the edges (see townWear).
+  const worn = townWear(x, z);
+  if (worn > 0) out.lerp(trodden, worn);
   // Widening the mountains' roughness earlier made ordinary rolling ground pick up
   // enough small-scale slope to light this up too, so gentle hillsides across the
   // whole off-road plain were reading as dark rock smudges from a distance. Only
@@ -1287,3 +1640,7 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
 
   return { group, update, prime, TILE, GRID, detailAmt };
 }
+
+// Everything placement reads is defined by now; from here on terrainHeight levels
+// landmark sites and groundHeight knows their walls.
+lmArmed = true;

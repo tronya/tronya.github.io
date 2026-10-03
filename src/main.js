@@ -8,9 +8,13 @@ import { createAmbient } from './ambient.js';
 import { createBeams } from './beams.js';
 import { CHASSIS, SPEC, CHASSIS_LIST, WHEEL_DEFS, setChassis } from './chassis.js';
 import { VehicleSim, PLANET } from './physics.js';
-import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt } from './terrain.js';
+import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt, getSettlement } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
+import { createSeeds, seedsDelivered, LAB } from './seeds.js';
+import { createLandmarks } from './landmarks.js';
+import { createJobs } from './jobs.js';
+import { createNPCs } from './npc.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
 import { createGrass } from './grass.js';
@@ -36,7 +40,7 @@ const ARRIVE_R = 70; // how close counts as docked at a base
 const FOG_NEAR = 594;
 const FOG_FAR = 1179;
 // ---------- solar rover ----------
-const SOL_SECONDS = 330; // one Martian day, compressed
+const SOL_SECONDS = 1080; // one Martian day, compressed (18 min)
 const BATTERY_MAX = 100;
 const DRAW_IDLE = 0.12; // %/s just being alive
 const DRAW_DRIVE = 0.62; // %/s at full power
@@ -218,6 +222,17 @@ const terrain = createTerrain(renderer.capabilities.getMaxAnisotropy());
 scene.add(terrain.group);
 terrain.prime(BASES[0].x, BASES[0].z);
 
+// Buildings, wrecks and oddities scattered off the road, a set per planet.
+const landmarks = createLandmarks();
+scene.add(landmarks.group);
+const TOWN = getSettlement();
+// Side jobs around those landmarks, handed out over the radio (jobs.js).
+const jobs = createJobs();
+scene.add(jobs.group);
+// People in the town, its rovers, haulers on the road (npc.js).
+const npcs = createNPCs();
+scene.add(npcs.group);
+
 const beacons = [];
 for (const b of BASES) {
   const built = buildBase(b.x, b.z);
@@ -239,6 +254,9 @@ if (PLANET === 'mars') {
   scene.add(missions.group);
   scene.add(debris.group);
 }
+// Верданта's own job: seed probes to bring to the lab beside АЛЬФА (see seeds.js).
+const seeds = PLANET === 'verdanta' ? createSeeds() : null;
+if (seeds) scene.add(seeds.group);
 const upgrades = createUpgrades(debris, missions);
 const sand = createSand();
 scene.add(sand.points);
@@ -412,17 +430,23 @@ function toggleSand() {
 
 // L cycles: auto (the default) -> off -> marker lights only -> full headlights.
 // Levels: 0 nothing, 1 marker lights (amber sides, red tail), 2 marker lights + headlights.
+// L cycles these. АВТО switches the headlights on in the dark but never the long-
+// range bar — at full strength it blinds you in town — so that has a mode of its
+// own, offered only once the ДАЛЬНЄ upgrade is fitted. Levels: 0 off, 1 marker
+// lights, 2 headlights, 3 headlights plus the long-range bar.
 const LAMP_MODES = [
   { label: 'АВТО', level: null },
-  { label: 'ВИМК', level: 0 },
-  { label: 'ГАБАРИТИ', level: 1 },
   { label: 'ФАРИ', level: 2 },
+  { label: 'ДАЛЬНЄ', level: 3, needs: 'farlight' },
+  { label: 'ВИМК', level: 0 },
 ];
 let lampMode = 0;
 function cycleLamps() {
-  lampMode = (lampMode + 1) % LAMP_MODES.length;
+  do lampMode = (lampMode + 1) % LAMP_MODES.length;
+  while (LAMP_MODES[lampMode].needs && !upgrades.unlocked(LAMP_MODES[lampMode].needs));
   document.getElementById('lamps').textContent = `Світло: ${LAMP_MODES[lampMode].label}`;
   document.getElementById('lamps').classList.toggle('on', lampMode !== 0);
+  flash(`Світло: ${LAMP_MODES[lampMode].label}`);
 }
 function lampLevel() {
   const fixed = LAMP_MODES[lampMode].level;
@@ -450,7 +474,7 @@ function setLamps(level) {
   cabLight.intensity = heads ? 25 * (MOUNT.cab.k ?? 1) : 0;
   // The long-range roof beam is a workshop unlock — no lamp mode lights it up until
   // ДАЛЬНЄ СВІТЛО is bought, whatever else is on.
-  const far = heads && upgrades.unlocked('farlight');
+  const far = level >= 3 && upgrades.unlocked('farlight');
   farLight.visible = far;
   farLight.intensity = far ? FAR_INTENSITY : 0;
 }
@@ -575,12 +599,13 @@ function storyCtx() {
     delivered: missions.deliveredCount(),
     upgradeLevels: UPGRADE_BRANCHES.reduce((n, b) => n + upgrades.level(b.id), 0),
     flashbackDone: progress.flashbackDone,
+    seeds: seeds ? seeds.deliveredCount() : seedsDelivered(),
   };
 }
 
 function refreshChapter() {
   if (story.finished) {
-    chapterEl.innerHTML = '<i>ЗАВДАННЯ ВИКОНАНО</i>вільний політ';
+    chapterEl.innerHTML = '<i>КАМПАНІЮ ЗАВЕРШЕНО</i>вільний політ';
     return;
   }
   const text = story.objective(storyCtx()).text;
@@ -683,6 +708,11 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') return toggleMap();
   if (e.code === 'KeyJ') return toggleSand();
   if (e.code === 'KeyC') return cycleCamera();
+  if (e.code === 'KeyN') {
+    const ev = jobs.skip();
+    if (ev) flash(ev.text);
+    return;
+  }
   keys.add(e.code);
   if (DRIVE_KEYS.has(e.code)) {
     setAutopilot(false);
@@ -700,6 +730,17 @@ const hudOdoTotal = document.getElementById('odoTotal');
 const hudMissions = document.getElementById('missionStat');
 const hudCarried = document.getElementById('carriedStat');
 const hudDebris = document.getElementById('debrisStat');
+const jobBoxEl = document.getElementById('jobBox');
+const jobTitleEl = document.getElementById('jobTitle');
+const jobStepEl = document.getElementById('jobStep');
+const jobGaugeEl = document.getElementById('jobGauge');
+const jobBarEl = document.getElementById('jobBar');
+const jobClockEl = document.getElementById('jobClock');
+if (seeds) {
+  // The mission panel speaks Верданта here: probes instead of modules, no мотлох.
+  document.getElementById('missionLabel').textContent = 'ЗОНДИ ЗДАНО';
+  document.getElementById('debrisRow').style.display = 'none';
+}
 const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
 
 // ---------- workshop panel (shows up on its own near БЕТА) ----------
@@ -868,7 +909,12 @@ const route = [];
 const WAYPOINT_R = 40;
 const map3dEl = document.getElementById('map3d');
 const routeInfo = document.getElementById('routeInfo');
-const minimap = createMinimap3D(document.getElementById('map3dCanvas'), document.getElementById('map3dOverlay'), missions.modules);
+const minimap = createMinimap3D(
+  document.getElementById('map3dCanvas'),
+  document.getElementById('map3dOverlay'),
+  seeds ? seeds.items : missions.modules,
+  seeds ? [{ x: LAB.x, z: LAB.z, text: 'Л', color: '#7ce68f' }] : TOWN ? [{ x: TOWN.x, z: TOWN.z, text: 'О', color: '#ffd08a' }] : []
+);
 
 function updateRouteInfo() {
   routeInfo.textContent = route.length
@@ -1247,7 +1293,7 @@ function frame() {
   // Visual model follows the rigid body.
   {
     const yw = sim.yaw();
-    terrain.update(sim.pos.x, sim.pos.z, 3, lampLevel() >= 2 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
+    terrain.update(sim.pos.x, sim.pos.z, 3, lampLevel() >= 3 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
   }
   sim.origin(origin);
   vehicle.root.position.copy(origin);
@@ -1451,6 +1497,40 @@ function frame() {
     }
     beams.update(dt, lampLevel() >= 2, 1 - daylight);
   }
+  landmarks.update(sim.pos.x, sim.pos.z);
+  npcs.update(dt, t, sim.pos);
+  {
+    const ev = jobs.update(t, dt, sim.pos.x, sim.pos.z, sim.speed);
+    if (ev) {
+      flash(ev.text);
+      if (ev.lines) say(ev.lines);
+      if (ev.type === 'done') {
+        progress.addBonusScrap(ev.pay);
+        if (audio) { audio.beep(880); setTimeout(() => audio.beep(1320), 150); }
+      } else if (audio) {
+        audio.beep(ev.type === 'offer' ? 660 : 1040, 0.1);
+      }
+    }
+    const jh = jobs.hud();
+    jobBoxEl.classList.toggle('on', !!jh);
+    if (jh) {
+      jobTitleEl.textContent = jh.title;
+      jobStepEl.textContent = jh.text;
+      jobGaugeEl.classList.toggle('on', jh.gauge !== null);
+      if (jh.gauge !== null) jobBarEl.style.width = `${Math.min(100, jh.gauge * 100).toFixed(0)}%`;
+      jobClockEl.textContent = jh.clock || '';
+    }
+  }
+  if (seeds) {
+    const ev = seeds.update(t, sim.pos.x, sim.pos.z);
+    if (ev) {
+      flash(ev.text);
+      if (audio) { audio.beep(ev.type === 'deliver' ? 1180 : 780); if (ev.type === 'pickup') setTimeout(() => audio.beep(1040), 110); }
+      storyClock = 0; // let the radio react straight away
+    }
+    hudMissions.textContent = `${seeds.deliveredCount()}/${seeds.total}`;
+    hudCarried.textContent = String(seeds.carriedCount());
+  }
   if (PLANET === 'moon') {
     const fb = flashback.update(dt, sim.pos.x, sim.pos.z);
     if (fb && progress.finishFlashback()) {
@@ -1525,12 +1605,21 @@ function frame() {
       if (!m.collected) compassTargets.push({ x: m.x, z: m.z, kind: 'diamond', color: '#' + m.color.toString(16).padStart(6, '0') });
     }
   }
+  if (seeds) {
+    for (const p of seeds.items) {
+      if (!p.collected) compassTargets.push({ x: p.x, z: p.z, kind: 'diamond', color: '#' + p.color.toString(16).padStart(6, '0') });
+    }
+    compassTargets.push({ x: LAB.x, z: LAB.z, kind: 'square', text: 'Л', color: '#7ce68f' });
+  }
   for (const b of BASES) compassTargets.push({ x: b.x, z: b.z, kind: 'square', text: b.name[0], color: '#4fe0ff' });
+  compassTargets.push(...jobs.targets());
+  if (TOWN) compassTargets.push({ x: TOWN.x, z: TOWN.z, kind: 'square', text: 'О', color: '#ffd08a' });
   for (const t of compassTargets) {
     t.bearing = compassBearing(t.x - sim.pos.x, t.z - sim.pos.z);
     t.dist = Math.hypot(t.x - sim.pos.x, t.z - sim.pos.z);
   }
   drawCompass(sim.yaw(), compassTargets);
+  minimap.setDynamic(jobs.targets());
   if (!map3dEl.classList.contains('hidden')) minimap.update(sim, dt);
   sunShadows.update();
   if ((tagClock += dt) > 0.5) { tagClock = 0; tagLayers(scene); }
@@ -1587,6 +1676,6 @@ scaleInput.addEventListener('input', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { vehicle, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

@@ -21,6 +21,15 @@
     .hudHead { display: block; font-size: 9.5px; letter-spacing: 0.22em; color: #7fd8ff; opacity: 0.9; margin-bottom: 5px; }
     #title { width: 250px; box-sizing: border-box; }
     #titleSub { display: block; margin-top: 5px; font-size: 10px; opacity: 0.6; }
+    #jobBox { display: none; }
+    #jobBox.on { display: block; }
+    #jobKey { float: right; font-style: normal; opacity: 0.55; letter-spacing: 0.08em; }
+    #jobTitle { display: block; font-size: 12px; line-height: 1.35; color: #ffd08a; }
+    #jobStep { display: block; margin-top: 3px; font-size: 11px; opacity: 0.85; }
+    #jobGauge { display: none; }
+    #jobGauge.on { display: block; }
+    #jobGauge i { background: #ffb347; }
+    #jobClock { display: block; margin-top: 3px; font-size: 10px; opacity: 0.7; }
     #title hr, #telemetry hr { border: 0; border-top: 1px solid rgba(255, 210, 170, 0.25); margin: 9px 0 6px; }
     #title .row, #telemetry .row { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px; font-size: 11px; text-align: left; }
     #telemetry { top: 16px; right: 16px; text-align: right; }
@@ -174,11 +183,19 @@
       <span id="chapter"></span>
       <span id="titleSub">перехід АЛЬФА → БЕТА · ~10 км</span>
       <hr>
-      <div class="row"><span>МОДУЛІ ЗДАНО</span><b id="missionStat">0/4</b></div>
+      <div class="row"><span id="missionLabel">МОДУЛІ ЗДАНО</span><b id="missionStat">0/4</b></div>
       <div class="row"><span>У КУЗОВІ</span><b id="carriedStat">0</b></div>
-      <div class="row"><span>МОТЛОХ</span><b id="debrisStat">0/28</b></div>
+      <div class="row" id="debrisRow"><span>МОТЛОХ</span><b id="debrisStat">0/28</b></div>
+      <div id="jobBox">
+        <hr>
+        <span class="hudHead">ДОРУЧЕННЯ <i id="jobKey">N — інше</i></span>
+        <span id="jobTitle"></span>
+        <span id="jobStep"></span>
+        <div class="gauge" id="jobGauge"><i id="jobBar"></i></div>
+        <span id="jobClock"></span>
+      </div>
     </div>
-    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.15 · новий звук: живий електромотор, хрускіт гравію, м’які сигнали замість 8-біт</span></div>
+    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.25 · доба триває 18 хв замість 5,5 — день і ніч змінюються втричі повільніше</span></div>
   </div>
     <div id="comms" class="panel"><span id="commsFrom"></span><span id="commsText"></span><span id="commsMore"></span></div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="70"></canvas></div>
@@ -266,13 +283,14 @@
     <div id="tab-keys" class="tabBody">
       <div class="secTitle">Рух</div>
       <div class="keyRow"><span><kbd>W</kbd></span>газ</div>
+      <div class="keyRow"><span><kbd>N</kbd></span>відмовитись від доручення, взяти інше</div>
       <div class="keyRow"><span><kbd>S</kbd></span>гальмо, далі задній хід</div>
       <div class="keyRow"><span><kbd>A</kbd> <kbd>D</kbd></span>кермо — відпусти, щоб повернути прямо</div>
       <div class="keyRow"><span><kbd>Пробіл</kbd></span>ручне гальмо</div>
       <div class="keyRow"><span><kbd>Shift</kbd></span>турбо, жере батарею вчетверо</div>
       <div class="secTitle">Ровер</div>
       <div class="keyRow"><span><kbd>E</kbd></span>сонячні крила</div>
-      <div class="keyRow"><span><kbd>L</kbd></span>світло: авто / вимк / габарити / фари</div>
+      <div class="keyRow"><span><kbd>L</kbd></span>світло: авто / фари / дальнє / вимк</div>
       <div class="keyRow"><span><kbd>R</kbd></span>поставити на колеса</div>
       <div class="keyRow"><span><kbd>H</kbd></span>повернутись на базу</div>
       <div class="keyRow"><span><kbd>P</kbd></span>автопілот</div>

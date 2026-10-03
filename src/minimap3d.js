@@ -39,7 +39,7 @@ function elevColor(hi, out) {
 }
 
 // canvas: the WebGL view. overlay: a plain 2D canvas stacked exactly on top of it.
-export function createMinimap3D(canvas, overlay, missionModules = []) {
+export function createMinimap3D(canvas, overlay, missionModules = [], extraSites = []) {
   const PAD = 240;
   const x0 = ROUTE_BOUNDS.x0 - PAD;
   const x1 = ROUTE_BOUNDS.x1 + PAD;
@@ -110,7 +110,8 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   // Bases, modules and the rover are drawn in plain 2D on the overlay (see
   // drawOverlay) — a 3D marker sized for the whole-crossing view is a speck on the
   // close-up and a boulder the other way round; a 2D icon is the same size in both.
-  const modules = PLANET === 'mars' ? missionModules : [];
+  // Гермес-3 modules on Mars, seed probes on Верданта, nothing on the Moon.
+  const modules = PLANET === 'moon' ? [] : missionModules;
 
   const sun = new THREE.DirectionalLight(LOOK.sun, 2.0);
   sun.position.set(-420, 720, 260);
@@ -141,6 +142,7 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   controls.update();
 
   let big = false;
+  let dynamic = []; // per-frame targets from outside (the current side job)
   let route = [];
 
   // A tap either opens the dialog (parked small) or, inside it, drops a waypoint —
@@ -325,6 +327,8 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
 
     const targets = [];
     for (const b of BASES) targets.push({ ...b, kind: 'square', r: 8, color: '#4fe0ff', text: b.name[0] });
+    for (const e of extraSites) targets.push({ x: e.x, z: e.z, kind: 'square', r: 8, color: e.color, text: e.text });
+    for (const d of dynamic) targets.push({ x: d.x, z: d.z, kind: d.kind || 'circle', r: 9, color: d.color, text: d.text });
     for (const m of modules) {
       if (!m.collected) targets.push({ x: m.x, z: m.z, kind: 'diamond', r: 8, color: '#' + m.color.toString(16).padStart(6, '0') });
     }
@@ -375,6 +379,9 @@ export function createMinimap3D(canvas, overlay, missionModules = []) {
   return {
     update,
     setRoute,
+    setDynamic(list) {
+      dynamic = list;
+    },
     resize,
     setBig(v) {
       big = v;

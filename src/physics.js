@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { groundHeight } from './terrain.js';
+import { groundHeight, landmarkWall, landmarkPoles } from './terrain.js';
 import { WHEEL_R, SUSP } from './vehicle.js';
 import { SPEC, WHEEL_DEFS, AXLE_PAIRS, steerAngle } from './chassis.js';
 import { PLANET } from './planet.js';
@@ -196,7 +196,14 @@ const rxn = V3(), tmpI = V3();
 const hullSeen = new Float32Array(BODY_POINTS.length * 4).fill(-1);
 const HULL_SKIP = 0.5; // m of clearance that always gets re-checked
 const HULL_SLOPE = 8; // steepest ground rise per metre moved (a boulder's edge)
-const hullContacts = Array.from({ length: BODY_POINTS.length }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0 }));
+// Room for every hull point against the ground and against a wall, plus poles.
+const hullContacts = Array.from({ length: BODY_POINTS.length * 2 + 16 }, () => ({ rel: V3(), n: V3(), pen: 0, jn: 0, cap: 0 }));
+// A building wall is rigid: it may stop the whole rover at speed within a few
+// substeps, where a ground contact is capped low so landings stay soft.
+const F_WALL_MAX = 80 * WEIGHT;
+const wallN = { x: 0, z: 0 };
+const poles = [];
+const poleLocal = V3();
 // World-space inverse inertia applied to a vector: out = R diag(1/I) R^T v.
 function invInertia(v, out, q) {
   out.copy(v).applyQuaternion(qInvScratch.copy(q).invert());
@@ -347,9 +354,19 @@ export class VehicleSim {
   solveHull(h) {
     const { quat: q, pos, vel, angVel } = this;
     let n = 0;
+    const wallCap = F_WALL_MAX * h;
     for (let i = 0; i < BODY_POINTS.length; i++) {
       rel.copy(BODY_POINTS[i]).sub(COM).applyQuaternion(q);
       tmpB.copy(pos).add(rel);
+      const wd = landmarkWall(tmpB.x, tmpB.y, tmpB.z, wallN);
+      if (wd > 0) {
+        const c = hullContacts[n++];
+        c.rel.copy(rel);
+        c.n.set(wallN.x, 0, wallN.z);
+        c.pen = Math.min(wd, 0.8);
+        c.jn = 0;
+        c.cap = wallCap;
+      }
       // Most hull points ride a metre or two clear of the ground, and in 1/240 s the
       // ground under them cannot rise that far. A point last seen well clear is not
       // re-sampled until it has moved enough — sideways, or down — that ground as
@@ -370,10 +387,37 @@ export class VehicleSim {
       c.n.set(-grad.x, 1, -grad.z).normalize();
       c.pen = pen;
       c.jn = 0;
+      c.cap = F_HULL_MAX * h; // most impulse one point may add in a step
+    }
+    qInv.copy(q).invert();
+    // Poles against the rover's box, in its own frame: push out across whichever
+    // side the pole is nearest to.
+    landmarkPoles(pos.x, pos.z, poles);
+    for (const p of poles) {
+      if (n >= hullContacts.length) break;
+      if (pos.y + BOX.h < p.y0 || pos.y - BOX.h > p.y1) continue;
+      poleLocal.set(p.x - pos.x, 0, p.z - pos.z).applyQuaternion(qInv).add(COM);
+      const ex = BOX.w / 2 + p.r - Math.abs(poleLocal.x);
+      const ez = BOX.l / 2 + p.r - Math.abs(poleLocal.z);
+      if (ex <= 0 || ez <= 0) continue;
+      const c = hullContacts[n++];
+      if (ex < ez) {
+        const sx = Math.sign(poleLocal.x) || 1;
+        c.rel.set(sx * BOX.w / 2, COM.y, poleLocal.z).sub(COM).applyQuaternion(q);
+        c.n.set(-sx, 0, 0).applyQuaternion(q);
+        c.pen = Math.min(ex, 0.8);
+      } else {
+        const sz = Math.sign(poleLocal.z) || 1;
+        c.rel.set(poleLocal.x, COM.y, sz * BOX.l / 2).sub(COM).applyQuaternion(q);
+        c.n.set(0, 0, -sz).applyQuaternion(q);
+        c.pen = Math.min(ez, 0.8);
+      }
+      c.n.y = 0;
+      c.n.normalize();
+      c.jn = 0;
+      c.cap = wallCap;
     }
     if (!n) return;
-    qInv.copy(q).invert();
-    const cap = F_HULL_MAX * h; // most impulse one point may add in a step
     for (let it = 0; it < HULL_ITER; it++) {
       for (let i = 0; i < n; i++) {
         const c = hullContacts[i];
@@ -381,10 +425,10 @@ export class VehicleSim {
         const vn = vp.dot(c.n);
         const vWant = Math.min(c.pen * 10, HULL_EXIT_V);
         let j = 0;
-        if (vn < vWant && c.jn < cap) {
+        if (vn < vWant && c.jn < c.cap) {
           rxn.crossVectors(c.rel, c.n);
           invInertia(rxn, tmpI, q);
-          j = Math.min((vWant - vn) / (1 / MASS + rxn.dot(tmpI)), cap - c.jn);
+          j = Math.min((vWant - vn) / (1 / MASS + rxn.dot(tmpI)), c.cap - c.jn);
           c.jn += j;
           vel.addScaledVector(c.n, j / MASS);
           rxn.multiplyScalar(j);

@@ -60,6 +60,12 @@ export const progress = {
     return false;
   },
 
+  // Pay for a finished side job (jobs.js), into the same pot as the flashback reward.
+  addBonusScrap(n) {
+    state.bonusScrap += n;
+    save();
+  },
+
   finishFlashback() {
     if (state.flashbackDone) return false;
     state.flashbackDone = true;
@@ -92,7 +98,7 @@ export function hasSave() {
 // reload is what actually resets the world, since planet.js and the mission and
 // debris pools all read their storage once at module load.
 export function newGame() {
-  for (const k of ['rover.progress', 'rover.upgrades', 'rover.debris', 'rover.missions', 'rover.odo']) {
+  for (const k of ['rover.progress', 'rover.upgrades', 'rover.debris', 'rover.missions', 'rover.verdanta', 'rover.odo']) {
     try { localStorage.removeItem(k); } catch (e) { /* storage may be blocked */ }
   }
   try {
