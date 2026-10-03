@@ -384,7 +384,7 @@ export function createAudio() {
       return enabled;
     },
     // speed m/s, throttle -1..1, contact 0..1, boost bool, daylight 0..1
-    update({ speed, throttle, contact, boost, daylight }) {
+    update({ speed, throttle, contact, boost, daylight, storm = 0 }) {
       if (!enabled) return;
       const v = Math.min(Math.abs(speed), 50);
       const load = Math.abs(throttle) * (boost ? 1.3 : 1);
@@ -407,8 +407,9 @@ export function createAudio() {
       at(sandGain.gain, contact * Math.min(0.12, v * 0.008), 0.15);
 
       // Nights feel colder: the wind sits higher and thinner.
-      at(windGain.gain, 0.55 + 0.3 * (1 - daylight) + v * 0.01, 0.6);
-      at(windLayers[1].bp.frequency, 520 + 260 * (1 - daylight), 1.0);
+      // A storm (weather.js) roars up over everything else.
+      at(windGain.gain, 0.55 + 0.3 * (1 - daylight) + v * 0.01 + storm * 1.6, 0.6);
+      at(windLayers[1].bp.frequency, 520 + 260 * (1 - daylight) + storm * 700, 1.0);
     },
     thump,
     servo,

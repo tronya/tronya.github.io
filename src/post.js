@@ -45,6 +45,9 @@ const finalMaterial = new THREE.ShaderMaterial({
     vignette: { value: 0.3 },
     aspect: { value: 1 },
     texel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
+    tShaft: { value: null },
+    shaftAmount: { value: 0 },
+    shaftColor: { value: new THREE.Color(1, 0.9, 0.75) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -61,6 +64,9 @@ const finalMaterial = new THREE.ShaderMaterial({
     uniform vec3 highTint;
     uniform float vignette;
     uniform float aspect;
+    uniform sampler2D tShaft;
+    uniform float shaftAmount;
+    uniform vec3 shaftColor;
     varying vec2 vUv;
 
     // three.js's ACES filmic, so the look matches the no-post path exactly.
@@ -96,9 +102,49 @@ const finalMaterial = new THREE.ShaderMaterial({
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, sat);
       c *= mix(shadowTint, highTint, smoothstep(0.1, 0.7, l));
+      if (shaftAmount > 0.0) {
+        float sh = texture2D(tShaft, vUv).r * shaftAmount;
+        c += shaftColor * sh * (1.0 - c * 0.6); // screen-ish: never blows the sky out
+      }
       vec2 d = (vUv - 0.5) * vec2(aspect, 1.0);
       c *= 1.0 - vignette * smoothstep(0.35, 1.05, length(d) * 1.25);
       gl_FragColor = vec4(c, 1.0);
+    }
+  `,
+  depthTest: false,
+  depthWrite: false,
+});
+
+// Light shafts ("god rays"), at quarter resolution: march from each pixel toward the
+// sun on screen and count how much open sky the path crosses. Ridges, rocks and the
+// rover break that up into rays; the result is added in the final pass.
+const shaftMaterial = new THREE.ShaderMaterial({
+  uniforms: { tDepth: { value: null }, sunUV: { value: new THREE.Vector2(0.5, 0.5) }, aspect: { value: 1 } },
+  vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDepth;
+    uniform vec2 sunUV;
+    uniform float aspect;
+    varying vec2 vUv;
+    const int STEPS = 36;
+    void main() {
+      vec2 toSun = vUv - sunUV;
+      float dist = length(toSun * vec2(aspect, 1.0));
+      vec2 delta = toSun * (0.92 / float(STEPS));
+      vec2 uv = vUv;
+      float sum = 0.0;
+      float wgt = 1.0;
+      float tot = 0.0;
+      for (int i = 0; i < STEPS; i++) {
+        vec2 q = clamp(uv, vec2(0.001), vec2(0.999));
+        sum += step(0.99999, texture2D(tDepth, q).x) * wgt;
+        tot += wgt;
+        wgt *= 0.965;
+        uv -= delta;
+      }
+      float s = sum / tot;
+      s *= exp(-dist * 1.5);
+      gl_FragColor = vec4(vec3(s), 1.0);
     }
   `,
   depthTest: false,
@@ -185,6 +231,11 @@ export function createPost(renderer, scene, camera) {
   const fadeQuad = new FullScreenQuad(aoFadeMaterial);
   const applyQuad = new FullScreenQuad(aoApplyMaterial);
   U.tBloom.value = bloom.renderTargetsHorizontal[0].texture;
+  const shaftRT = new THREE.WebGLRenderTarget(Math.max(1, Math.round(size.x / 4)), Math.max(1, Math.round(size.y / 4)));
+  shaftMaterial.uniforms.tDepth.value = sceneRT.depthTexture;
+  U.tShaft.value = shaftRT.texture;
+  const shaftQuad = new FullScreenQuad(shaftMaterial);
+  let shaftAmt = 0;
 
   function renderAO() {
     const m = ao.gtaoMaterial.uniforms;
@@ -257,6 +308,13 @@ export function createPost(renderer, scene, camera) {
     update(daylight) {
       bloom.strength = 0.95 - 0.6 * daylight;
     },
+    // Sun position in screen uv, how strong the rays are (0 = off, skips the pass)
+    // and their colour.
+    setShafts(u, v, amount, color) {
+      shaftMaterial.uniforms.sunUV.value.set(u, v);
+      shaftAmt = amount;
+      if (color) U.shaftColor.value.copy(color);
+    },
     render() {
       const mask = camera.layers.mask;
       if (!enabled) {
@@ -283,6 +341,11 @@ export function createPost(renderer, scene, camera) {
       renderer.shadowMap.autoUpdate = autoShadow;
       camera.layers.mask = mask;
       if (settings.bloom) renderBloom();
+      U.shaftAmount.value = shaftAmt;
+      if (shaftAmt > 0.005) {
+        renderer.setRenderTarget(shaftRT);
+        shaftQuad.render(renderer);
+      }
       U.bloomAmount.value = settings.bloom ? 1 : 0;
       U.exposure.value = renderer.toneMappingExposure;
       renderer.setRenderTarget(null);
@@ -297,6 +360,8 @@ export function createPost(renderer, scene, camera) {
       aoFadeRT.setSize(Math.max(1, Math.round(W / 2)), Math.max(1, Math.round(H / 2)));
       bloom.setSize(Math.round(W / 2), Math.round(H / 2));
       U.aspect.value = w / h;
+      shaftMaterial.uniforms.aspect.value = w / h;
+      shaftRT.setSize(Math.max(1, Math.round(W / 4)), Math.max(1, Math.round(H / 4)));
       U.texel.value.set(1 / W, 1 / H);
     },
     passes: { ao, bloom },

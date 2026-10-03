@@ -81,6 +81,80 @@ function solarTexture() {
 M.solar = new THREE.MeshStandardMaterial({ map: solarTexture(), metalness: 0.45, roughness: 0.28, side: THREE.DoubleSide });
 M.panelBack = std(0x2a2d34, 0.5, 0.5);
 
+// ---------- paint, glass and dirt ----------
+// The painted panels get a clear coat, so the sky and the sun slide across them as
+// the rover turns; the glass and bare metal reflect more of the sky too.
+for (const k of ['hull', 'hullLit', 'trim', 'hazard', 'copper', 'graphite', 'orange', 'armorLit']) {
+  const o = M[k];
+  M[k] = new THREE.MeshPhysicalMaterial({
+    color: o.color, metalness: o.metalness, roughness: Math.max(0.3, o.roughness - 0.1),
+    clearcoat: 0.65, clearcoatRoughness: 0.12,
+  });
+}
+M.glass.envMapIntensity = 2.4;
+M.glassDark.envMapIntensity = 2.2;
+M.visor.envMapIntensity = 1.8;
+M.metal.envMapIntensity = 1.5;
+M.solar.envMapIntensity = 1.6;
+
+// Dust and mud build up as you drive (main.js sets the amount): heaviest low down and
+// round the wheels, blotchy, flattening the shine. Washed off by rain and wading.
+// Worked out in the rover's own frame, so the grime rides with the body; the wheels
+// use their own frame, so it turns with the tyre.
+const DIRT = {
+  amount: { value: 0 },
+  color: { value: new THREE.Color(0x9a6a44) },
+  inv: { value: new THREE.Matrix4() },
+};
+function dirtify(mat, spinning) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.dirtAmt = DIRT.amount;
+    sh.uniforms.dirtCol = DIRT.color;
+    sh.uniforms.dirtInv = DIRT.inv;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform mat4 dirtInv;\nvarying vec3 vDirtP;\nvarying float vDirtLow;\nvarying float vDirtUp;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        {
+          vec4 dw = modelMatrix * vec4( transformed, 1.0 );
+          vec3 rp = ( dirtInv * dw ).xyz;
+          vDirtP = ${spinning ? 'transformed * 1.6' : 'rp'};
+          vDirtLow = ${spinning ? '0.8' : '1.0 - smoothstep( -0.6, 1.6, rp.y )'};
+          vDirtUp = normalize( ( dirtInv * modelMatrix * vec4( objectNormal, 0.0 ) ).xyz ).y;
+        }`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform float dirtAmt;
+uniform vec3 dirtCol;
+varying vec3 vDirtP;
+varying float vDirtLow;
+varying float vDirtUp;
+float dHash( vec3 p ) { return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
+float dNoise( vec3 p ) {
+  vec3 i = floor( p ); vec3 f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( dHash( i ), dHash( i + vec3( 1, 0, 0 ) ), f.x ), mix( dHash( i + vec3( 0, 1, 0 ) ), dHash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+              mix( mix( dHash( i + vec3( 0, 0, 1 ) ), dHash( i + vec3( 1, 0, 1 ) ), f.x ), mix( dHash( i + vec3( 0, 1, 1 ) ), dHash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        float dirtK = 0.0;
+        if ( dirtAmt > 0.001 ) {
+          float n = dNoise( vDirtP * 1.3 ) * 0.5 + dNoise( vDirtP * 4.5 ) * 0.3 + dNoise( vDirtP * 17.0 ) * 0.2;
+          float where = vDirtLow * 0.8 + max( vDirtUp, 0.0 ) * 0.25 + 0.05;
+          float cover = dirtAmt * where;
+          float film = cover * 0.45;                                        // a fine even coat
+          float clump = smoothstep( 0.85 - cover, 1.25 - cover, n ) * 0.75; // and soft patches
+          dirtK = clamp( max( film, clump ), 0.0, 0.8 );
+          diffuseColor.rgb = mix( diffuseColor.rgb, dirtCol, dirtK );
+        }`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n        roughnessFactor = mix( roughnessFactor, 0.97, dirtK );')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n        metalnessFactor *= 1.0 - dirtK;')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n        #ifdef USE_CLEARCOAT\n        material.clearcoat *= 1.0 - dirtK;\n        #endif');
+  };
+}
+for (const [k, m] of Object.entries(M)) {
+  if (!m.isMeshStandardMaterial || m.transparent || m === M.solar) continue;
+  dirtify(m, k === 'tire' || k === 'rim');
+}
+
 // Lamps and glazing never cast: they are unlit strips or transparent.
 const NO_CAST = new Set([M.amber, M.amberDim, M.headlight, M.tail, M.screen, M.glass, M.glassDark, M.lime, M.teal]);
 
@@ -1271,5 +1345,12 @@ export function buildVehicle() {
 
   wheels.forEach((_, i) => setSuspension(i, SUSP.Lstatic));
   setPanels(0);
-  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, TAIL_LAMPS: tailLamps, MOUNTS: SPEC.mounts };
+  // amount 0..1; color the planet's dust or mud.
+  function setDirt(amount, color) {
+    DIRT.amount.value = amount;
+    if (color) DIRT.color.value.copy(color);
+    DIRT.inv.value.copy(root.matrixWorld).invert();
+  }
+
+  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, setDirt, TAIL_LAMPS: tailLamps, MOUNTS: SPEC.mounts };
 }

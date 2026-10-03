@@ -31,6 +31,7 @@ import { createDustTrail } from './dust.js';
 import { createSonar, MAX_BIAS as SONAR_MAX_BIAS } from './sonar.js';
 import { createMinimap3D } from './minimap3d.js';
 import { createSkyMaterial, updateSky, horizonColor, planetOrbit } from './sky.js';
+import { createWeather, WEATHER_TEXT } from './weather.js';
 
 const ARRIVE_R = 70; // how close counts as docked at a base
 // Fog only far from the rover. Exponential fog was fully opaque by ~500 m, which
@@ -148,6 +149,9 @@ const mixC = new THREE.Color();
 const cA = new THREE.Color();
 const cB = new THREE.Color();
 let daylight = 0;
+let stormW = 0; // weather.w, mirrored here for lampLevel(), which runs before weather exists
+const fogBase = new THREE.Color();
+let viewK = 1; // the view-distance slider, which the fog follows
 let envAt = -1;
 
 // The sun is up between these hours; the rest of the sol is night.
@@ -184,6 +188,7 @@ function applyTimeOfDay(timeOfDay) {
   const orbit = PLANET === 'verdanta' ? planetOrbit(timeOfDay) : null;
   updateSky(sky.material, sunDir, k, orbit);
   horizonColor(k, scene.fog.color);
+  fogBase.copy(scene.fog.color);
   if (orbit) {
     planetLight.position.copy(sim.pos).addScaledVector(orbit.dir, 80);
     planetLight.target.position.copy(sim.pos);
@@ -232,6 +237,53 @@ scene.add(jobs.group);
 // People in the town, its rovers, haulers on the road (npc.js).
 const npcs = createNPCs();
 scene.add(npcs.group);
+// Dust storms on Mars, rain on Верданта (weather.js); weatherLook() lays the storm
+// over whatever applyTimeOfDay() just set, so the two never fight.
+const weather = createWeather();
+scene.add(weather.group);
+const HAZE = {
+  dust: { day: new THREE.Color(0xa87a52), night: new THREE.Color(0x261a12) },
+  rain: { day: new THREE.Color(0x7e8a8c), night: new THREE.Color(0x161c1e) },
+}[weather.kind];
+const hazeC = new THREE.Color();
+const KIND_FAR = weather.kind === 'rain' ? 260 : 150;
+const hazeFog = new THREE.Color();
+// God rays (post.js): where the sun sits on screen and how strong to make them —
+// strongest low in the sky and in a dust storm, nothing on the airless Moon.
+const _sunScr = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+const _shaftCol = new THREE.Color();
+function updateShafts() {
+  if (PLANET === 'moon') return post.setShafts(0.5, 0.5, 0);
+  camera.getWorldDirection(_camDir);
+  const facing = clamp(_camDir.dot(sunDir) * 1.6 + 0.2, 0, 1);
+  const up = clamp((sunDir.y + 0.04) / 0.12, 0, 1);
+  const low = 1 - clamp(sunDir.y / 0.7, 0, 1);
+  const amt = facing * up * (0.3 + 0.5 * low) * (1 + 1.2 * stormW) * (PLANET === 'verdanta' ? 0.6 : 1);
+  _sunScr.copy(sunDir).multiplyScalar(800).add(camera.position).project(camera);
+  _shaftCol.copy(sun.color);
+  post.setShafts((_sunScr.x + 1) / 2, (_sunScr.y + 1) / 2, amt, _shaftCol);
+}
+function weatherLook() {
+  const w = weather.w;
+  // At full blow you see maybe 150 m: the far terrain is simply gone in the murk.
+  const s = Math.min(1, w * 1.25);
+  scene.fog.near = THREE.MathUtils.lerp(FOG_NEAR * viewK, 8, s);
+  scene.fog.far = THREE.MathUtils.lerp(FOG_FAR * viewK, KIND_FAR, s);
+  sky.material.uniforms.haze.value = Math.min(1, w * 1.2);
+  if (w <= 0) {
+    scene.fog.color.copy(fogBase);
+    sun.intensity = look.intensity;
+    scene.environmentIntensity = look.env;
+    return;
+  }
+  hazeC.copy(HAZE.night).lerp(HAZE.day, daylight);
+  sky.material.uniforms.hazeColor.value.copy(hazeC);
+  hazeFog.setRGB(hazeC.r, hazeC.g, hazeC.b, THREE.SRGBColorSpace);
+  scene.fog.color.copy(fogBase).lerp(hazeFog, Math.min(1, w * 1.2));
+  sun.intensity = look.intensity * (1 - 0.72 * w);
+  scene.environmentIntensity = look.env * (1 - 0.3 * w);
+}
 
 const beacons = [];
 for (const b of BASES) {
@@ -240,7 +292,10 @@ for (const b of BASES) {
   beacons.push({ ...built, x: b.x, z: b.z });
 }
 
-const tracks = createTracks(WHEEL_DEFS.length, 170, WHEEL_DEFS.map((d) => 1.05 * d.wk));
+const DIRT_COLOR = new THREE.Color({ mars: 0x8e5e3a, moon: 0x6c6a66, verdanta: 0x4a3a28 }[PLANET] || 0x8e5e3a);
+const dirt = { v: 0, saveT: 0 };
+try { dirt.v = Number(localStorage.getItem('rover.dirt')) || 0; } catch (e) { /* storage may be blocked */ }
+const tracks = createTracks(WHEEL_DEFS.length, PLANET === 'moon' ? 1400 : 260, WHEEL_DEFS.map((d) => 1.05 * d.wk));
 const drawSize = new THREE.Vector2();
 const sandCtx = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, wheels: [], daylight: 1, pxPerUnit: 1000, head: { on: false, x: 0, y: 0, z: 0, dx: 0, dz: 1 }, tail: { on: false, x: 0, y: 0, z: 0 } };
 const roadPosts = createRoadPosts();
@@ -295,6 +350,33 @@ function makeDustTexture() {
   return new THREE.CanvasTexture(c);
 }
 const dustTex = makeDustTexture();
+
+// Contact shadow: a soft dark oval on the ground under the hull. The real sun shadow
+// is there too, but the sky/hemisphere fill washes it out, so the rover looked like
+// it hovered. Sized from the wheel footprint, fades as the rover leaves the ground.
+const contactShadow = (() => {
+  let wx = 0, wz = 0;
+  for (const w of WHEEL_DEFS) { wx = Math.max(wx, Math.abs(w.x)); wz = Math.max(wz, Math.abs(w.z)); }
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const cx = c.getContext('2d');
+  const gr = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, '#fff');
+  gr.addColorStop(0.65, '#d8d8d8');
+  gr.addColorStop(1, '#000');
+  cx.fillStyle = gr; // alphaMap reads the green channel, so grey on opaque black
+  cx.fillRect(0, 0, 64, 64);
+  const mat = new THREE.MeshBasicMaterial({ alphaMap: new THREE.CanvasTexture(c), color: 0x0a0503, transparent: true, opacity: 0.5,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+  plane.rotation.x = -Math.PI / 2;
+  plane.scale.set(wx * 2 + 2.4, wz * 2 + 3.4, 1);
+  plane.renderOrder = 1;
+  const g = new THREE.Group();
+  g.add(plane);
+  scene.add(g);
+  return { g, mat, on: 1 };
+})();
 const dust = createDustTrail();
 scene.add(dust.group);
 const sonar = createSonar(vehicle.root);
@@ -450,7 +532,7 @@ function cycleLamps() {
 }
 function lampLevel() {
   const fixed = LAMP_MODES[lampMode].level;
-  return fixed !== null ? fixed : daylight < 0.45 ? 2 : 0;
+  return fixed !== null ? fixed : daylight < 0.45 || stormW > 0.35 ? 2 : 0;
 }
 
 const HEAD_INTENSITY = 2200;
@@ -674,6 +756,7 @@ document.getElementById('viewDist').addEventListener('input', (e) => {
   const k = e.target.value / 100;
   document.getElementById('viewDistV').textContent = `${e.target.value}%`;
   setViewScale(k);
+  viewK = k;
   scene.fog.near = FOG_NEAR * k;
   scene.fog.far = FOG_FAR * k;
 });
@@ -698,6 +781,13 @@ let autopilot = false;
 const keys = new Set();
 const DRIVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyF' || (photo && e.code === 'Escape')) return togglePhoto();
+  if (photo) {
+    if (e.code === 'Enter') return savePhoto();
+    keys.add(e.code);
+    if (DRIVE_KEYS.has(e.code)) e.preventDefault();
+    return;
+  }
   if (e.code === 'KeyP') return setAutopilot(!autopilot);
   if (e.code === 'KeyE') return togglePanels();
   if (e.code === 'KeyL') return cycleLamps();
@@ -1243,6 +1333,87 @@ camTarget.set(sim.pos.x, sim.pos.y + 0.5, sim.pos.z);
 controls.target.copy(camTarget);
 camera.position.copy(camTarget).add(camOffset.set(-Math.sin(camYaw) * CAM_BACK, CAM_UP, -Math.cos(camYaw) * CAM_BACK));
 
+// ---------- photo mode ----------
+// F freezes the world and frees the camera: drag to look round, wheel to zoom, WASD to
+// slide, Q/E down/up, [ ] to roll the clock, Enter saves a PNG. The HUD is hidden.
+let photo = null;
+const photoBar = document.getElementById('photoBar');
+function togglePhoto() {
+  if (menuOpen) return;
+  if (!photo) {
+    photo = {
+      pos: camera.position.clone(), target: controls.target.clone(), mode: camMode,
+      minD: controls.minDistance, maxD: controls.maxDistance, polar: controls.maxPolarAngle,
+    };
+    keys.clear();
+    setAutopilot(false);
+    controls.enabled = true;
+    controls.minDistance = 1.2;
+    controls.maxDistance = 400;
+    controls.maxPolarAngle = Math.PI - 0.05;
+    document.body.classList.add('photo');
+  } else {
+    controls.minDistance = photo.minD;
+    controls.maxDistance = photo.maxD;
+    controls.maxPolarAngle = photo.polar;
+    camera.position.copy(photo.pos);
+    controls.target.copy(photo.target);
+    setCamMode(photo.mode);
+    photo = null;
+    keys.clear();
+    clock.getDelta(); // swallow the paused time so physics does not jump
+    document.body.classList.remove('photo');
+  }
+}
+function savePhoto() {
+  post.render();
+  renderer.domElement.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    a.download = `solar-rover-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    photoBar.classList.add('snap');
+    setTimeout(() => photoBar.classList.remove('snap'), 250);
+  }, 'image/png');
+}
+const photoMove = new THREE.Vector3();
+const photoRight = new THREE.Vector3();
+function photoFrame(dt) {
+  const fast = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1;
+  const step = Math.max(4, camera.position.distanceTo(controls.target)) * 0.9 * fast * dt;
+  camera.getWorldDirection(photoMove);
+  photoMove.y = 0;
+  photoMove.normalize();
+  photoRight.crossVectors(photoMove, UP);
+  const d = new THREE.Vector3();
+  if (keys.has('KeyW') || keys.has('ArrowUp')) d.add(photoMove);
+  if (keys.has('KeyS') || keys.has('ArrowDown')) d.sub(photoMove);
+  if (keys.has('KeyD') || keys.has('ArrowRight')) d.add(photoRight);
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) d.sub(photoRight);
+  if (keys.has('KeyE')) d.y += 1;
+  if (keys.has('KeyQ')) d.y -= 1;
+  if (d.lengthSq()) {
+    d.multiplyScalar(step);
+    camera.position.add(d);
+    controls.target.add(d);
+  }
+  if (keys.has('BracketRight')) timeOfDay = (timeOfDay + dt * 0.04) % 1;
+  if (keys.has('BracketLeft')) timeOfDay = (timeOfDay - dt * 0.04 + 1) % 1;
+  applyTimeOfDay(timeOfDay);
+  weatherLook();
+  controls.update();
+  const minY = groundHeight(camera.position.x, camera.position.z) + 0.4;
+  if (camera.position.y < minY) camera.position.y = minY;
+  sky.position.copy(camera.position);
+  const hh = Math.floor(timeOfDay * 24);
+  const mm = Math.floor((timeOfDay * 24 - hh) * 60);
+  photoBar.querySelector('b').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 
@@ -1263,6 +1434,14 @@ function frame() {
     // Hold everything — clock included — so the sol does not run and the battery
     // does not drain while the player is still deciding.
     sunShadows.update();
+    post.render();
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (photo) {
+    photoFrame(dt);
+    sunShadows.update();
+    updateShafts();
     post.render();
     requestAnimationFrame(frame);
     return;
@@ -1368,6 +1547,20 @@ function frame() {
     timeOfDay = (timeOfDay + dt / SOL_SECONDS) % 1;
     applyTimeOfDay(timeOfDay);
   }
+  weather.update(dt, camera.position, daylight);
+  stormW = weather.w;
+  weatherLook();
+  // The ground soaks up quickly in rain and dries slowly after.
+  if (weather.kind === 'rain') {
+    const wv = terrain.wet.value;
+    terrain.wet.value = clamp(wv + (weather.w > 0.25 ? dt / 35 : -dt / 160), 0, 1);
+  }
+  if (weather.event && WEATHER_TEXT[weather.kind]) {
+    const msg = WEATHER_TEXT[weather.kind][weather.event];
+    flash(msg);
+    if (audio && weather.event === 'start') audio.speak(msg.split(' —')[0]);
+  }
+  if (weather.kind === 'rain') sim.gripMul *= 1 - 0.15 * weather.w;
   setLamps(lampLevel());
 
   const target = power.wantPanels ? 1 : 0;
@@ -1378,7 +1571,7 @@ function frame() {
   vehicle.setPanels(power.panels);
 
   // Charging needs the wings fully open and the sun above the horizon.
-  power.charge = power.panels > 0.99 ? CHARGE_PEAK * chargeMul * Math.max(0, sunDir.y) : 0;
+  power.charge = power.panels > 0.99 ? CHARGE_PEAK * chargeMul * Math.max(0, sunDir.y) * (1 - 0.75 * weather.w) : 0;
   // Rear-only drive spins up half the drivetrain, so it costs less to hold the same
   // throttle — the payoff for giving up front-axle traction above AWD_UP.
   power.draw = (DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8)) * drawMul;
@@ -1451,10 +1644,36 @@ function frame() {
   for (const l of tailLights) l.intensity = lampsLit ? 14 + 56 * braking : 0;
   for (const l of markerLights) l.intensity = lampsLit ? 14 : 0;
 
-  if (PLANET === 'mars') tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact })));
+  tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact && waterDepthAt(w.sim.cx, w.sim.cz) < 0.05 })));
+  // Grime: builds up over a few minutes of driving (faster in a dust storm), washed
+  // off by rain and by fording the river. Kept across reloads.
+  {
+    const touching = W.filter((w) => w.sim.contact).length / W.length;
+    const v = Math.min(1, Math.abs(sim.speed) / 8);
+    let d = dirt.v + dt * touching * v * (1 + 2 * (weather.kind === 'dust' ? weather.w : 0)) / 220;
+    if (weather.kind === 'rain') d -= dt * weather.w / 45;
+    d -= dt * Math.min(1, waterDepthAt(sim.pos.x, sim.pos.z) / 0.6) / 6;
+    dirt.v = clamp(d, 0, 1);
+    vehicle.root.updateMatrixWorld();
+    vehicle.setDirt(dirt.v, DIRT_COLOR);
+    if ((dirt.saveT += dt) > 5) {
+      dirt.saveT = 0;
+      try { localStorage.setItem('rover.dirt', dirt.v.toFixed(3)); } catch (e) { /* storage may be blocked */ }
+    }
+  }
 
   // Loose sand: scattered by the wheels, lit by the sun or, at night, by the headlights.
   const yawNow = sim.yaw();
+  {
+    const gy = groundHeight(sim.pos.x, sim.pos.z);
+    let touching = 0;
+    for (const w of sim.wheels) if (w.contact) touching++;
+    contactShadow.on += ((touching ? 1 : 0.25) - contactShadow.on) * (1 - Math.exp(-6 * dt));
+    contactShadow.g.position.set(sim.pos.x, gy + 0.06, sim.pos.z);
+    contactShadow.g.rotation.y = yawNow;
+    contactShadow.g.visible = sim.upY > 0.3;
+    contactShadow.mat.opacity = (0.45 + 0.4 * daylight) * contactShadow.on;
+  }
   const fx = Math.sin(yawNow);
   const fz = Math.cos(yawNow);
   sandCtx.x = sim.pos.x;
@@ -1495,10 +1714,11 @@ function frame() {
       sim.vel.z += air.push.y * dt;
       sim.angVel.y += air.push.length() * 0.04 * dt;
     }
-    beams.update(dt, lampLevel() >= 2, 1 - daylight);
+    // In a storm the lamps light the dust and rain in the air, day or night.
+    beams.update(dt, lampLevel() >= 2, Math.min(1.8, Math.max(1 - daylight, stormW * 0.7) * (1 + stormW)));
   }
-  landmarks.update(sim.pos.x, sim.pos.z);
-  npcs.update(dt, t, sim.pos);
+  landmarks.update(sim.pos.x, sim.pos.z, daylight);
+  npcs.update(dt, t, sim.pos, 1 - daylight);
   {
     const ev = jobs.update(t, dt, sim.pos.x, sim.pos.z, sim.speed);
     if (ev) {
@@ -1587,7 +1807,7 @@ function frame() {
   if (audio) {
     const contacts = W.filter((w) => w.sim.contact).length / W.length;
     audio.update({ speed: sim.speed, throttle: sim.cmd.throttle, contact: contacts,
-      boost: sim.cmd.boost, daylight });
+      boost: sim.cmd.boost, daylight, storm: weather.w });
     // Knock when a wheel slams into its bump stop.
     for (const w of W) {
       const hard = w.sim.contact && w.sim.L < SUSP.Lmin + 0.04;
@@ -1624,6 +1844,7 @@ function frame() {
   sunShadows.update();
   if ((tagClock += dt) > 0.5) { tagClock = 0; tagLayers(scene); }
   post.update(daylight);
+  updateShafts();
   post.render();
 
   const now = performance.now();
@@ -1676,6 +1897,6 @@ scaleInput.addEventListener('input', () => {
 });
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { dirt, tracks, weather, contactShadow, vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

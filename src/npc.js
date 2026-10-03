@@ -281,6 +281,10 @@ function createWalkers(town, count, makeLook, seed0) {
     people.push({
       x: at.x, z: at.z, path: [], wait: rand() * 4, phase: rand() * 6, speed: 0.9 + rand() * 0.5,
       yaw: 0, shy: 0, blink: rand() * 4, wave: 0, scale: 0.92 + rand() * 0.2,
+      // Night: most go home to their own door at their own hour and stay in till
+      // morning; about one in four is on the night shift and keeps walking.
+      home: L.doors[Math.floor(rand() * L.doors.length)], bed: 0.35 + rand() * 0.5,
+      owl: rand() < 0.25, inside: false, homing: false,
     });
     look.color(i);
   }
@@ -302,10 +306,38 @@ function createWalkers(town, count, makeLook, seed0) {
 
   return {
     group,
-    update(dt, t, rover) {
+    update(dt, t, rover, night = 0) {
       for (let i = 0; i < n; i++) {
         const p = people[i];
         let moving = false;
+        const sleepy = !p.owl && night > p.bed;
+        if (p.inside) {
+          if (night < p.bed - 0.25) {
+            // Morning: out of the door, a moment's pause, then about the day.
+            p.inside = false;
+            p.x = p.home.x;
+            p.z = p.home.z;
+            p.path = [];
+            p.wait = 0.5 + rand() * 3;
+          } else {
+            anchor.x = 0;
+            anchor.y = -1e4;
+            anchor.z = 0;
+            look.pose(place, i, st);
+            continue;
+          }
+        } else if (sleepy && !p.homing) {
+          p.homing = true;
+          p.path = route(p, p.home);
+          p.wait = 0;
+        } else if (!sleepy) {
+          p.homing = false;
+        }
+        if (p.homing && !p.path.length && p.shy <= 0) {
+          p.inside = true;
+          p.homing = false;
+          continue;
+        }
         // Give way: a rover close by sends people off to the side of it.
         const w0 = toWorld(p.x, p.z);
         const dx = w0.x - rover.x;
@@ -519,12 +551,12 @@ export function createNPCs() {
 
   return {
     group,
-    update(dt, t, rover) {
+    update(dt, t, rover, night = 0) {
       const nearTown = town && Math.hypot(rover.x - town.x, rover.z - town.z) < 900;
       if (walkers) {
         for (const w of walkers) {
           w.group.visible = nearTown;
-          if (nearTown) w.update(Math.min(dt, 0.1), t, rover);
+          if (nearTown) w.update(Math.min(dt, 0.1), t, rover, night);
         }
       }
       for (const { d, town: inTown } of drivers) {

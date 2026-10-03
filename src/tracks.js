@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { surfaceHeight } from './terrain.js';
+import { PLANET } from './planet.js';
 
 // Tyre ruts pressed into the regolith. Each segment is a shallow channel: the middle
 // sits low and dark where the wheel packed the dust down, and the dust pushed aside
@@ -14,21 +15,30 @@ const TELEPORT = 25; // a jump bigger than this is a reset, not driving
 // keeps it clear of the terrain mesh instead of z-fighting it.
 // Vertex colours go into the buffer already linear, so writing sRGB-looking numbers
 // here made the berms glow almost white. THREE.Color does the conversion.
-const BERM = new THREE.Color(0xc08a5a).toArray(); // dust thrown clear of the tyre
-const FLOOR = new THREE.Color(0x7c4b2f).toArray(); // packed down under it
+// Per planet: Martian dust, grey lunar regolith, dark Verdantan mud.
+const TINTS = {
+  mars: [0xc08a5a, 0x6a3e26],
+  moon: [0xa4a4a0, 0x464646],
+  verdanta: [0x6e5c44, 0x2e241a],
+}[PLANET] || [0xc08a5a, 0x6a3e26];
+const BERM = new THREE.Color(TINTS[0]).toArray(); // dust thrown clear of the tyre
+const FLOOR = new THREE.Color(TINTS[1]).toArray(); // packed down under it
 const LANES = [
-  { off: -1.0, lift: 0.005, tint: BERM },
-  { off: -0.68, lift: 0.125, tint: BERM },
-  { off: -0.4, lift: 0.02, tint: FLOOR },
-  { off: 0.4, lift: 0.02, tint: FLOOR },
-  { off: 0.68, lift: 0.125, tint: BERM },
-  { off: 1.0, lift: 0.005, tint: BERM },
+  { off: -1.05, lift: 0.005, tint: BERM },
+  { off: -0.7, lift: 0.17, tint: BERM },
+  { off: -0.42, lift: 0.015, tint: FLOOR },
+  { off: 0.42, lift: 0.015, tint: FLOOR },
+  { off: 0.7, lift: 0.17, tint: BERM },
+  { off: 1.05, lift: 0.005, tint: BERM },
 ];
+// No wind on the Moon: a rut stays exactly as it was made, so there they never fade
+// (the ring is just long — a couple of kilometres per wheel — before it reuses).
+const FOREVER = PLANET === 'moon';
 const STRIPS = LANES.length - 1;
 const VERTS_PER_SEG = STRIPS * 6;
 // Which lane each vertex of a strip belongs to, for colouring.
 const LANE_OF_VERT = [];
-for (let l = 0; l < STRIPS; l++) LANE_OF_VERT.push(l, l + 1, l, l + 1, l + 1, l);
+for (let l = 0; l < STRIPS; l++) LANE_OF_VERT.push(l, l, l + 1, l + 1, l, l + 1);
 
 // `width` is one number for every wheel, or one per wheel for a chassis whose rear
 // tyres are wider than the fronts.
@@ -37,11 +47,14 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
   const pos = new Float32Array(total * 3);
   const nrm = new Float32Array(total * 3);
   const col = new Float32Array(total * 4);
+  const birth = new Float32Array(total);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  geo.setAttribute('birth', new THREE.BufferAttribute(birth, 1));
+  const A = ['position', 'normal', 'color', 'birth'].map((n) => geo.attributes[n]);
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -53,14 +66,30 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
   });
+  // Fade by age in the shader: each vertex carries the sequence number of the segment
+  // it was laid in, and `seq` is the newest. So adding a segment uploads only that
+  // segment, instead of rewriting every alpha in the ring each time.
+  const seqU = { value: 0 };
+  const life = segments * wheels;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.seq = seqU;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float birth;\nuniform float seq;')
+      .replace('#include <color_vertex>', `#include <color_vertex>
+        float trackF = ${FOREVER ? '1.0' : `max( 0.0, 1.0 - ( seq - birth ) / ${life.toFixed(1)} )`};
+        vColor.a *= trackF * trackF;`);
+  };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; // the ring spans hundreds of metres and moves
   mesh.receiveShadow = true;
   mesh.renderOrder = 1;
 
   const halves = Array.from({ length: wheels }, (_, w) => (Array.isArray(width) ? width[w] : width) / 2);
-  const head = new Int32Array(wheels);
-  const filled = new Int32Array(wheels);
+  const ringSize = wheels * segments;
+  let ringHead = 0;
+  let upLo = Infinity;
+  let upHi = -1;
+  let upAll = false;
   const last = Array.from({ length: wheels }, () => ({ x: 0, z: 0, has: false }));
 
   const cx = new Float64Array(LANES.length * 2);
@@ -86,7 +115,14 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
       }
     }
 
-    let o = (w * segments + head[w]) * VERTS_PER_SEG * 3;
+    // One ring shared by all the wheels, so a frame's new segments sit side by side in
+    // the buffers and go up to the GPU as one small contiguous range.
+    const seg = ringHead;
+    ringHead = (ringHead + 1) % ringSize;
+    if (seg < upLo) upLo = seg;
+    if (seg > upHi) upHi = seg;
+    if (seg === 0 && upHi > 0) upAll = true; // wrapped mid-frame
+    let o = seg * VERTS_PER_SEG * 3;
     for (let l = 0; l < STRIPS; l++) {
       const a0 = l;
       const b0 = l + 1;
@@ -112,7 +148,9 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
         nz = -nz;
       }
 
-      for (const idx of [a0, b0, a1, b0, b1, a1]) {
+      // Wound counter-clockwise seen from above, so the faces point up (the other
+      // way round they were back-face culled and never drawn at all).
+      for (const idx of [a0, a1, b0, b0, a1, b1]) {
         pos[o] = cx[idx];
         pos[o + 1] = cy[idx];
         pos[o + 2] = cz[idx];
@@ -123,38 +161,27 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
       }
     }
 
-    head[w] = (head[w] + 1) % segments;
-    if (filled[w] < segments) filled[w]++;
-  }
-
-  // Alpha falls off with age. Age is the distance back from the write head, so this
-  // only needs rewriting when a segment is added, not every frame.
-  function refade(w) {
-    for (let k = 0; k < segments; k++) {
-      const age = (head[w] - 1 - k + segments * 2) % segments;
-      const live = filled[w] === segments || k < filled[w];
-      const f = live ? Math.max(0, 1 - age / segments) : 0;
-      const alpha = 0.7 * f * f;
-      let o = (w * segments + k) * VERTS_PER_SEG * 4;
-      for (let v = 0; v < VERTS_PER_SEG; v++) {
-        const tint = LANES[LANE_OF_VERT[v]].tint;
-        col[o] = tint[0];
-        col[o + 1] = tint[1];
-        col[o + 2] = tint[2];
-        col[o + 3] = alpha;
-        o += 4;
-      }
+    seqU.value++;
+    const v0 = seg * VERTS_PER_SEG;
+    for (let v = 0; v < VERTS_PER_SEG; v++) {
+      const tint = LANES[LANE_OF_VERT[v]].tint;
+      const c = (v0 + v) * 4;
+      col[c] = tint[0];
+      col[c + 1] = tint[1];
+      col[c + 2] = tint[2];
+      col[c + 3] = 0.78;
+      birth[v0 + v] = seqU.value;
     }
   }
 
   function clear() {
     pos.fill(0);
     col.fill(0);
-    head.fill(0);
-    filled.fill(0);
+    birth.fill(0);
+    for (const a of A) a.clearUpdateRanges();
+    ringHead = 0;
     for (const l of last) l.has = false;
-    geo.attributes.position.needsUpdate = true;
-    geo.attributes.color.needsUpdate = true;
+    for (const a of A) a.needsUpdate = true;
   }
 
   // contacts: one {x, z, contact} per wheel, in world space
@@ -181,15 +208,24 @@ export function createTracks(wheels = 4, segments = 170, width = 1.05) {
       }
       if (d < STEP) continue;
       emit(w, l.x, l.z, c.x, c.z);
-      refade(w);
       l.x = c.x;
       l.z = c.z;
       touched = true;
     }
     if (touched) {
-      geo.attributes.position.needsUpdate = true;
-      geo.attributes.normal.needsUpdate = true;
-      geo.attributes.color.needsUpdate = true;
+      // A single range per attribute (three r170 mis-merges several of them).
+      const sizes = [3, 3, 4, 1];
+      A.forEach((a, i) => {
+        a.clearUpdateRanges();
+        if (!upAll) {
+          const k = VERTS_PER_SEG * sizes[i];
+          a.addUpdateRange(upLo * k, (upHi - upLo + 1) * k);
+        }
+        a.needsUpdate = true;
+      });
+      upLo = Infinity;
+      upHi = -1;
+      upAll = false;
     }
   }
 

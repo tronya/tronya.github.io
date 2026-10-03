@@ -1323,9 +1323,12 @@ export function createTerrain(anisotropy = 8) {
   // repeat period far beyond what the eye picks up.
   const detail = makeDetailTexture(anisotropy);
   const detailAmt = { value: 1 };
+  // Rain (weather.js) soaks the ground: 0 dry .. 1 drenched, driven from main.js.
+  const wet = { value: 0 };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.tDetail = { value: detail };
     shader.uniforms.detailAmt = detailAmt;
+    shader.uniforms.wet = wet;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vDetailPos;\nvarying vec3 vDetailN;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvDetailPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvDetailN = normalize( mat3( modelMatrix ) * objectNormal );');
@@ -1335,6 +1338,16 @@ varying vec3 vDetailPos;
 varying vec3 vDetailN;
 uniform sampler2D tDetail;
 uniform float detailAmt;
+uniform float wet;
+// Smooth value noise for where rain pools into puddles.
+float wetHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+float wetNoise( vec2 p ) {
+  vec2 i = floor( p );
+  vec2 f = fract( p );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( wetHash( i ), wetHash( i + vec2( 1.0, 0.0 ) ), f.x ),
+              mix( wetHash( i + vec2( 0.0, 1.0 ) ), wetHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
 // Triplanar: the same detail laid from above and from both sides, blended by which
 // way the ground faces — a flat top-down projection smeared into streaks on slopes.
 vec4 triDetail( vec3 p, vec3 w, float scale ) {
@@ -1345,6 +1358,7 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
       .replace(
         '#include <map_fragment>',
         `vec2 detailDH = vec2( 0.0 );
+       float wetPuddle = 0.0;
        #ifdef USE_MAP
          // Coarse layer carries the blotches and repeats only every ~26 m; the fine
          // layer is folded in as a brightness modulation so close-up grain stays
@@ -1366,11 +1380,26 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
            float albedo = max( 0.1, ( 0.2 + 1.6 * d1.g ) * ( 0.62 + 0.76 * d2.g ) );
            diffuseColor.rgb *= mix( 1.0, albedo, min( dNear, 1.0 ) );
            detailDH = vec2( dFdx( h ), dFdy( h ) ) * 0.64 * dNear;
+         }
+         // Soaked: the whole ground darkens, and on flat patches water pools into
+         // puddles — darker still, glassy, their bumps smoothed away.
+         if ( wet > 0.0 ) {
+           float flatG = smoothstep( 0.93, 0.99, normalize( vDetailN ).y );
+           float pm = wetNoise( vDetailPos.xz / 9.0 ) * 0.7 + wetNoise( vDetailPos.xz / 2.7 + 7.3 ) * 0.3;
+           wetPuddle = smoothstep( 0.63, 0.69, pm ) * flatG * smoothstep( 0.35, 1.0, wet );
+           diffuseColor.rgb *= mix( 1.0, 0.72, wet );
+           diffuseColor.rgb *= mix( 1.0, 0.55, wetPuddle );
          }`
       )
       .replace(
         '#include <normal_fragment_maps>',
-        THREE.ShaderChunk.normal_fragment_maps.replace('dHdxy_fwd()', '( dHdxy_fwd() + detailDH )')
+        THREE.ShaderChunk.normal_fragment_maps.replace('dHdxy_fwd()', '( ( dHdxy_fwd() + detailDH ) * ( 1.0 - wetPuddle ) )')
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+         roughnessFactor = mix( roughnessFactor, 0.5, wet * 0.6 );
+         roughnessFactor = mix( roughnessFactor, 0.05, wetPuddle );`
       );
   };
   const rockGeo = makeRockGeometry();
@@ -1638,7 +1667,7 @@ vec4 triDetail( vec3 p, vec3 w, float scale ) {
     while (queue.length || job) update(x, z, Infinity);
   }
 
-  return { group, update, prime, TILE, GRID, detailAmt };
+  return { group, update, prime, TILE, GRID, detailAmt, wet };
 }
 
 // Everything placement reads is defined by now; from here on terrainHeight levels

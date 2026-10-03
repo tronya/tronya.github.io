@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lamp } from './glow.js';
 import { PLANET } from './planet.js';
-import { getLandmarks } from './terrain.js';
+import { getLandmarks, groundHeight } from './terrain.js';
 import { settlementLayout } from './landmark-types.js';
 
 // The buildings, wrecks and odd structures terrain.js scatters across each planet.
@@ -37,7 +37,15 @@ const M = {
   green_l: new THREE.MeshBasicMaterial({ color: lamp(0x7ce68f, 3) }),
   white_l: new THREE.MeshBasicMaterial({ color: lamp(0xfff2d6, 3) }),
 };
-const NO_SHADOW = new Set([M.glass, M.red, M.amber, M.green_l, M.white_l]);
+// Town night lights: three window groups (people turn in at different hours, so the
+// town goes dark a window at a time), and the street lamps. Their colour is set every
+// frame from the daylight; by day the windows are dark glass and the lamps are off.
+const WIN = [0, 1, 2].map(() => new THREE.MeshBasicMaterial({ color: 0x223038 }));
+const STREET = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
+const POOL_COL = new THREE.Color(0xffc27a);
+let winPick = 0;
+const nextWin = () => WIN[(winPick = (winPick * 7 + 5) % 11) % 3];
+const NO_SHADOW = new Set([M.glass, M.red, M.amber, M.green_l, M.white_l, STREET, ...WIN]);
 
 // --- tiny builders, all in the landmark's frame ---
 function add(g, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
@@ -375,19 +383,19 @@ function buildSettlement(g) {
       cyl(home, 4.7, 4.7, 0.4, M.dark, 0, 0.2, 0, 24);
       box(home, 1.8, 2.4, 2, M.hab2, 0, 1.2, 4.4);
       box(home, 1, 1.8, 0.08, M.dark, 0, 1, 5.42);
-      box(home, 1.2, 0.35, 0.06, M.white_l, 0, 3, 3.9);
+      box(home, 1.2, 0.35, 0.06, nextWin(), 0, 3, 3.9);
     } else if (h.kind === 'module') {
       box(home, 7, 3.6, 5.4, M.hab2, 0, 1.8, 0);
       box(home, 7.2, 0.2, 5.6, M.dark, 0, 3.7, 0);
       add(home, new THREE.BoxGeometry(6, 0.06, 2.4), M.solar, 0, 4.1, -0.6, -0.35, 0, 0);
       box(home, 1.1, 2, 0.08, M.dark, 1.8, 1, 2.72);
-      for (const x of [-2, -0.6]) box(home, 0.9, 0.7, 0.06, M.white_l, x, 2.2, 2.72);
+      for (const x of [-2, -0.6]) box(home, 0.9, 0.7, 0.06, nextWin(), x, 2.2, 2.72);
     } else {
       box(home, 6, 3.2, 6, M.hab3, 0, 1.6, 0);
       box(home, 5.4, 3.2, 5.4, M.white, 0, 4.8, -0.2);
       box(home, 3, 0.15, 1.4, M.dark, 0, 3.3, 3.6);
       box(home, 1.1, 2, 0.08, M.dark, -1.6, 1, 3.02);
-      for (const y of [2, 5]) box(home, 1.2, 0.7, 0.06, M.white_l, 1.4, y, y > 3 ? 2.52 : 3.02);
+      for (const y of [2, 5]) box(home, 1.2, 0.7, 0.06, nextWin(), 1.4, y, y > 3 ? 2.52 : 3.02);
       cyl(home, 0.04, 0.04, 2, M.metal, 2, 7.4, -2, 6);
     }
     g.add(home);
@@ -466,7 +474,7 @@ function buildSettlement(g) {
   for (const l of L.lamps) {
     cyl(g, 0.1, 0.14, 5, M.dark, l.x, 2.5, l.z, 6);
     box(g, 0.6, 0.18, 0.6, M.dark, l.x, 5.05, l.z);
-    box(g, 0.45, 0.06, 0.45, M.white_l, l.x, 4.93, l.z);
+    box(g, 0.45, 0.06, 0.45, STREET, l.x, 4.93, l.z);
   }
 }
 
@@ -495,6 +503,42 @@ function bake(src) {
   return out;
 }
 
+const _warm = lamp(0xffb45a, 2.6);
+const _street = lamp(0xfff0d0, 3.2);
+
+// Soft warm circles on the ground under the street lamps, additive so they only ever
+// brighten; faded in by update() as night falls.
+const POOL_MAT = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, '#fff');
+  gr.addColorStop(0.35, '#777');
+  gr.addColorStop(1, '#000');
+  x.fillStyle = gr;
+  x.fillRect(0, 0, 64, 64);
+  return new THREE.MeshBasicMaterial({ color: POOL_COL, alphaMap: new THREE.CanvasTexture(c), transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+})();
+function lightPools(lm) {
+  const L = settlementLayout();
+  const geo = new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2);
+  const m = new THREE.InstancedMesh(geo, POOL_MAT, L.lamps.length);
+  const c = Math.cos(lm.yaw);
+  const s = Math.sin(lm.yaw);
+  const mtx = new THREE.Matrix4();
+  L.lamps.forEach((l, i) => {
+    const wx = lm.x + l.x * c + l.z * s;
+    const wz = lm.z - l.x * s + l.z * c;
+    mtx.makeTranslation(wx, groundHeight(wx, wz) + 0.12, wz);
+    m.setMatrixAt(i, mtx);
+  });
+  m.frustumCulled = false;
+  m.renderOrder = 1;
+  return m;
+}
+
 const SHOW_DIST = 1500;
 const SHOW_DIST_TOWN = 2200;
 
@@ -504,8 +548,10 @@ export function createLandmarks() {
     const g = new THREE.Group();
     g.position.set(lm.x, lm.y, lm.z);
     g.rotation.y = lm.yaw;
+    let pools = null;
     if (lm.type.id === 'settlement') {
       buildSettlement(g);
+      pools = lightPools(lm);
     } else {
       const build = BUILD[lm.type.id];
       if (build) build(g);
@@ -513,6 +559,7 @@ export function createLandmarks() {
       add(g, new THREE.CylinderGeometry(lm.r * 0.55, lm.r * 0.6, 1.2, 20), M.dark, 0, -0.62, 0);
     }
     const baked = bake(g);
+    if (pools) baked.add(pools);
     baked.visible = false;
     group.add(baked);
     return { lm, mesh: baked };
@@ -521,7 +568,16 @@ export function createLandmarks() {
   return {
     group,
     list,
-    update(x, z) {
+    update(x, z, daylight = 1) {
+      // Dusk: windows come on as the sun sinks, then go out group by group late at
+      // night; street lamps and their pools of light follow the dark.
+      const dark = THREE.MathUtils.smoothstep(1 - daylight, 0.25, 0.75);
+      for (let k = 0; k < 3; k++) {
+        const on = dark * (k === 0 ? 1 : k === 1 ? 0.85 : 0.6);
+        WIN[k].color.setRGB(0.13, 0.19, 0.22).lerp(_warm, on);
+      }
+      STREET.color.setRGB(0.54, 0.54, 0.5).lerp(_street, dark);
+      POOL_MAT.opacity = 0.32 * dark;
       for (const it of list) it.mesh.visible = Math.hypot(it.lm.x - x, it.lm.z - z) < (it.lm.type.id === 'settlement' ? SHOW_DIST_TOWN : SHOW_DIST);
     },
   };

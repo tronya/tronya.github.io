@@ -110,6 +110,9 @@ export function createSkyMaterial() {
       planetColorB: { value: new THREE.Color(0x4c4e53) },
       planetR: { value: 0 },
       planetGlow: { value: 0 },
+      // Weather (weather.js): a dust storm or rain cloud smothering the whole dome.
+      haze: { value: 0 },
+      hazeColor: { value: new THREE.Color() },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -139,6 +142,8 @@ export function createSkyMaterial() {
       uniform float planetSpin;
       uniform float planetR;
       uniform float planetGlow;
+      uniform float haze;
+      uniform vec3 hazeColor;
       varying vec3 vDir;
 
       // Ring span, in planet radii.
@@ -282,6 +287,7 @@ export function createSkyMaterial() {
             col += planetColorA * pow(max(ps, 0.0), 80.0) * planetGlow * (1.0 - edge);
           }
         }
+        col = mix(col, hazeColor, haze * mix(1.0, 0.75, smoothstep(0.0, 1.0, d.y)));
         gl_FragColor = vec4(col, 1.0);
       }
     `,
