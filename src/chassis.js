@@ -23,6 +23,10 @@ const SPECS = {
   // whole game was balanced around — do not drift them.
   truck: {
     id: 'truck',
+    // Range and off-road ability (main.js): pack size and use per metre against the
+    // stock pack, idle drain, solar array area, rolling resistance and churn off the
+    // graded road, and how deep it fords.
+    terrain: { pack: 1, perM: 0.0055, idle: 1, solar: 1, offRoll: 1, offDrag: 1, wade: 1.1 },
     blurb: 'збалансований, прощає помилки; на швидкості відключає передній міст',
     name: 'СКАУТ 4×4',
     tag: 'сонячний ровер · Гермес-3',
@@ -67,6 +71,7 @@ const SPECS = {
   // if one wheel is in a hole.
   crawler: {
     id: 'crawler',
+    terrain: { pack: 1.5, perM: 0.005, idle: 1.3, solar: 1.6, offRoll: 0.85, offDrag: 0.9, wade: 1.4 },
     blurb: 'повільний, але лізе будь-куди: блоковані диференціали, усі колеса кермові',
     name: 'КРАУЛЕР 6×6',
     tag: 'важкий краулер · Титан-6',
@@ -128,6 +133,8 @@ const SPECS = {
   // suspension and locked diffs, on bigger tyres under a heavier body.
   hauler: {
     id: 'hauler',
+    // Huge pack and array, heavy appetite; wades rivers that stop anything else.
+    terrain: { pack: 3, perM: 0.0075, idle: 2, solar: 2.6, offRoll: 0.8, offDrag: 0.9, wade: 1.9 },
     blurb: 'важкий і стійкий, знижена передача; неквапливий, зате майже не перекидається',
     name: 'ТРАНСПОРТЕР 8×8',
     tag: 'броньований транспортер · Атлас-8',
@@ -172,6 +179,7 @@ const SPECS = {
   // riding high between them, a glass canopy over the nose. Quick and bouncy.
   buggy: {
     id: 'buggy',
+    terrain: { pack: 0.75, perM: 0.0054, idle: 0.7, solar: 0.6, offRoll: 1.15, offDrag: 1.2, wade: 0.8 },
     blurb: 'легкий і стрибучий, довгий хід підвіски, швидкий по горбах',
     name: 'БАГІ 4×4',
     tag: 'легкий баггі · Койот',
@@ -219,6 +227,9 @@ const SPECS = {
   // speed, on shorter, firmer suspension that wants smooth ground.
   speedster: {
     id: 'speedster',
+    // A road car: tiny pack, tiny array, and off the graded road it bogs down in the
+    // regolith; low nose, so water much over the hubs stops it.
+    terrain: { pack: 0.6, perM: 0.0055, idle: 0.6, solar: 0.45, offRoll: 3.2, offDrag: 14, wade: 0.45 },
     blurb: 'найшвидший: притискна сила, широкі задні шини; любить рівну дорогу',
     name: 'СПІДСТЕР 4×4',
     tag: 'швидкісний ровер · Стріла',

@@ -117,7 +117,9 @@
       overflow: hidden; border-radius: 8px; border-color: rgba(79, 208, 255, 0.45); }
     #map3d.hidden { display: none; }
     #map3d.big { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%);
-      width: min(82vw, 900px); height: min(78vh, 640px); }
+      width: min(88vw, 1000px); height: min(84vh, 720px); z-index: 60; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); }
+    #map3d.big #map3dCanvas { cursor: grab; }
+    #map3d.big #map3dCanvas:active { cursor: grabbing; }
     #map3dCanvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
     /* Waypoint badges are drawn here in plain 2D, on top of the 3D view — a pixel
        size set this way stays exactly that many pixels, small panel or big dialog,
@@ -136,22 +138,43 @@
     #mapClose { display: none; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; z-index: 1;
       background: rgba(28, 13, 8, 0.78); border: 1px solid rgba(255, 210, 170, 0.32); border-radius: 50%;
       color: inherit; font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
-    #map3d.big #mapClose { display: block; }
+    #map3d.big #mapClose { display: block; z-index: 2; }
     #hint { top: 80px; left: 50%; transform: translateX(-50%); display: none; }
     /* Shows up on its own once the rover is parked near БЕТА — a shop, not a menu,
        so it opens by proximity rather than a button. */
-    #workshop { top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; width: 360px; }
+    #workshop { top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; width: 860px; max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 32px); overflow-y: auto; padding: 14px 16px; z-index: 30; }
     #workshop.show { display: block; }
-    .wsHead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-    .wsHead b { font-size: 14px; letter-spacing: 0.1em; }
-    .wsRow { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 9px; font-size: 11px; }
-    .wsRow .wsName { opacity: 0.9; }
-    .wsRow .wsName i { display: block; font-style: normal; opacity: 0.6; font-size: 10px; }
-    .wsRow .wsLevel { opacity: 0.75; white-space: nowrap; }
-    .wsRow button { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 210, 170, 0.3); color: inherit;
-      font: inherit; font-size: 11px; padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
-    .wsRow button:disabled { opacity: 0.35; cursor: default; }
-    .wsRow button.maxed { opacity: 0.55; cursor: default; }
+    .wsHead { display: flex; align-items: baseline; gap: 14px; }
+    .wsHead b { font-size: 15px; letter-spacing: 0.12em; flex: 1; }
+    #wsClose { background: none; border: none; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; opacity: 0.7; padding: 0 2px; }
+    #wsClose:hover { opacity: 1; }
+    #wsWhere { font-size: 11px; opacity: 0.65; margin: 4px 0 10px; }
+    #wsWhere.here { color: #8fe08a; opacity: 0.95; }
+    #wsTree { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .wsBranch { position: relative; border: 1px solid rgba(255, 210, 170, 0.15); border-radius: 8px; padding: 8px 8px 10px; background: rgba(0, 0, 0, 0.12); }
+    .wsBranch h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.16em; opacity: 0.7; text-align: center; font-weight: 600; }
+    .wsGrid { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 86px; gap: 14px 8px; }
+    .wsGrid svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    .wsNode { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+      border-radius: 10px; border: 1px solid rgba(255, 210, 170, 0.25); background: rgba(30, 14, 8, 0.85); color: inherit; font: inherit;
+      font-size: 10px; text-align: center; padding: 4px 3px; cursor: default; line-height: 1.2; }
+    .wsNode .ic { font-size: 20px; line-height: 1.1; }
+    .wsNode .nm { font-weight: 600; letter-spacing: 0.04em; }
+    .wsNode .vl { opacity: 0.7; }
+    .wsNode .ct { margin-top: 2px; font-weight: 600; }
+    .wsNode.owned { border-color: rgba(143, 224, 138, 0.7); background: rgba(40, 70, 30, 0.75); }
+    .wsNode.owned .ct { color: #8fe08a; }
+    .wsNode.open { border-color: rgba(255, 170, 80, 0.9); box-shadow: 0 0 10px rgba(255, 150, 60, 0.35); }
+    .wsNode.open.buy { cursor: pointer; }
+    .wsNode.open.buy:hover { background: rgba(90, 45, 15, 0.9); }
+    .wsNode.open .ct { color: #ffb066; }
+    .wsNode.poor .ct { color: #ff7a5a; }
+    .wsNode.locked { opacity: 0.38; }
+    #upgBtn { position: absolute; top: 8px; left: 10px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 210, 170, 0.3);
+      border-radius: 6px; color: inherit; font-size: 14px; line-height: 1; padding: 3px 6px; cursor: pointer; }
+    #upgBtn:hover { background: rgba(255, 255, 255, 0.16); }
+    #upgBtn.pulse { box-shadow: 0 0 0 2px rgba(255, 170, 80, 0.8); }
     /* Frame time is the closest an ordinary web page gets to a CPU-load reading —
        browsers don't expose real OS CPU percentage — but a rising number here means
        the same thing: something is taking longer to compute or draw each frame. */
@@ -200,7 +223,7 @@
         <span id="jobClock"></span>
       </div>
     </div>
-    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.30 · трава мнеться під ровером, тіні хмар, помітніші пилові вихори, Фобос і Деймос, метеори, Чумацький Шлях, пресети графіки, кольоровий тон і зерно</span></div>
+    <div id="debugBar" class="panel"><span id="dbgFps">60 FPS</span><span id="dbgMs">· 16.7 мс/кадр</span><span id="version">v2.38 · грудки з-під коліс дрібніші й рідші</span></div>
   </div>
     <div id="comms" class="panel"><span id="commsFrom"></span><span id="commsText"></span><span id="commsMore"></span></div>
   <div id="compass" class="panel"><canvas id="compassCanvas" width="560" height="70"></canvas></div>
@@ -209,17 +232,19 @@
     <canvas id="map3dOverlay"></canvas>
     <button id="mapClose" title="Закрити">&times;</button>
     <div id="mapBar">
-      <span id="routeInfo">Маршрут порожній — клацай по карті, щоб ставити точки</span>
-      <span class="mapBtns"><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button></span>
+      <span id="routeInfo">Маршрут порожній — клацай по карті, щоб ставити точки; тягни — рух, коліщатко — зум</span>
+      <span class="mapBtns"><button id="mapCenter">До ровера</button><button id="routeUndo">Прибрати</button><button id="routeClear">Очистити</button></span>
     </div>
   </div>
   <div id="telemetry" class="panel">
+    <button id="upgBtn" title="Покращення (U)">🛠</button>
     <span class="hudHead">РОВЕР</span>
     <div id="speed">0 км/год</div>
     <div id="mode"></div>
     <hr>
     <div class="row"><span>БАТАРЕЯ</span><b id="battery">100%</b></div>
     <div class="gauge"><i id="batteryBar"></i></div>
+    <div class="row"><span>ЗАПАС ХОДУ</span><b id="rangeLeft">~0 км</b></div>
     <div class="row"><span id="panelState">КРИЛА: СКЛАДЕНІ</span><b id="powerFlow">0.00 %/с</b></div>
     <div class="row" id="odoRow" title="Клац — обнулити поїздку"><span>ПОЇЗДКА</span><b id="odoTrip">0 м</b></div>
     <div class="row sol"><span>ПРОБІГ ВСЬОГО</span><b id="odoTotal">0 м</b></div>
@@ -230,8 +255,9 @@
   <div id="hint" class="panel">Перевернулись? Натисни <kbd>R</kbd>, щоб поставити на колеса</div>
 
   <div id="workshop" class="panel">
-    <div class="wsHead"><b>МАЙСТЕРНЯ БЕТА</b><span id="wsCurrency">мотлох: 0</span></div>
-    <div id="wsRows"></div>
+    <div class="wsHead"><b>ПОКРАЩЕННЯ</b><span id="wsCurrency">мотлох: 0</span><button id="wsClose" title="Закрити (U)">&times;</button></div>
+    <div id="wsWhere"></div>
+    <div id="wsTree"></div>
   </div>
 
   <div id="menu" class="panel">
@@ -308,6 +334,7 @@
       <div class="keyRow"><span><kbd>P</kbd></span>автопілот</div>
       <div class="secTitle">Інтерфейс</div>
       <div class="keyRow"><span><kbd>O</kbd></span>це меню</div>
+      <div class="keyRow"><span><kbd>U</kbd></span>дерево покращень (купувати — у майстерні на БЕТА)</div>
       <div class="keyRow"><span><kbd>K</kbd></span>звук</div>
       <div class="keyRow"><span><kbd>M</kbd></span>3D-карта — клац по ній відкриває маршрут</div>
       <div class="keyRow"><span><kbd>J</kbd></span>камінці з-під коліс</div>

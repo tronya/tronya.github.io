@@ -20,12 +20,52 @@ export const BRANCHES = [
   { id: 'suspension', icon: '🔧', label: 'ПІДВІСКА', hint: 'амортизація', kind: 'levels', costs: [4, 6], vals: [1, 1.6, 2.4], fmt: (v) => `×${v.toFixed(1)}` },
   { id: 'panels', icon: '☀', label: 'ПАНЕЛІ', hint: 'заряджання', kind: 'levels', costs: [3, 4], vals: [1, 1.45, 2], fmt: (v) => `×${v.toFixed(2)}` },
   { id: 'battery', icon: '🔋', label: 'ЖИВЛЕННЯ', hint: 'витрата', kind: 'levels', costs: [3, 4], vals: [1, 0.8, 0.62], fmt: (v) => `×${v.toFixed(2)}` },
-  { id: 'farlight', icon: '🔦', label: 'ДАЛЬНЄ СВІТЛО', hint: 'промінь на 800 м', kind: 'unlock', costs: [6], vals: [0, 1] },
-  { id: 'sonar', icon: '📡', label: 'СОНАР', hint: 'бачить перешкоди попереду', kind: 'unlock', costs: [6], vals: [0, 1] },
-  { id: 'avoidance', icon: '↩', label: 'АВТОУНИКНЕННЯ', hint: 'сам обʼїжджає, потребує сонар', kind: 'unlock', costs: [5], vals: [0, 1], requires: 'sonar' },
-  { id: 'autopilot', icon: '🤖', label: 'АВТОПІЛОТ', hint: 'їде сам за маршрутом', kind: 'unlock', costs: [6], vals: [0, 1] },
+  { id: 'farlight', icon: '🔦', label: 'ДАЛЬНЄ СВІТЛО', hint: 'промінь на 800 м', short: 'промінь 800 м', kind: 'unlock', costs: [6], vals: [0, 1] },
+  { id: 'sonar', icon: '📡', label: 'СОНАР', hint: 'бачить перешкоди попереду', short: 'бачить перешкоди', kind: 'unlock', costs: [6], vals: [0, 1] },
+  // Levels here are how far ahead it starts steering round obstacles, in metres.
+  { id: 'avoidance', icon: '↩', label: 'АВТОУНИКНЕННЯ', hint: 'сам обʼїжджає перешкоди, потребує сонар', kind: 'levels', costs: [5, 6, 8], vals: [0, 30, 50, 80], fmt: (v) => (v ? `${v} м` : 'нема'), requires: 'sonar' },
+  { id: 'autopilot', icon: '🤖', label: 'АВТОПІЛОТ', hint: 'їде сам за маршрутом', short: 'їде маршрутом', kind: 'unlock', costs: [6], vals: [0, 1] },
 ];
 const BY_ID = Object.fromEntries(BRANCHES.map((b) => [b.id, b]));
+
+// The same upgrades laid out as a tech tree in three branches. Each node is one
+// level of one upgrade; `req` lists what must be owned first ("id:level"), on top
+// of the previous level of the same upgrade. `x` (0..2) and `row` place it.
+export const TREE = [
+  {
+    title: 'ХОДОВА',
+    nodes: [
+      { id: 'motor', lvl: 1, x: 1, row: 0 },
+      { id: 'wheels', lvl: 1, x: 0, row: 1, req: ['motor:1'] },
+      { id: 'suspension', lvl: 1, x: 2, row: 1, req: ['motor:1'] },
+      { id: 'motor', lvl: 2, x: 1, row: 2, req: ['wheels:1', 'suspension:1'] },
+      { id: 'wheels', lvl: 2, x: 0, row: 3, req: ['motor:2'] },
+      { id: 'suspension', lvl: 2, x: 2, row: 3, req: ['motor:2'] },
+    ],
+  },
+  {
+    title: 'ЕНЕРГІЯ',
+    nodes: [
+      { id: 'panels', lvl: 1, x: 1, row: 0 },
+      { id: 'battery', lvl: 1, x: 0, row: 1, req: ['panels:1'] },
+      { id: 'farlight', lvl: 1, x: 2, row: 1, req: ['panels:1'] },
+      { id: 'panels', lvl: 2, x: 1, row: 2, req: ['battery:1'] },
+      { id: 'battery', lvl: 2, x: 1, row: 3, req: ['panels:2'] },
+    ],
+  },
+  {
+    title: 'ЕЛЕКТРОНІКА',
+    nodes: [
+      { id: 'sonar', lvl: 1, x: 1, row: 0 },
+      { id: 'avoidance', lvl: 1, x: 0, row: 1, req: ['sonar:1'] },
+      { id: 'autopilot', lvl: 1, x: 2, row: 1, req: ['sonar:1'] },
+      { id: 'avoidance', lvl: 2, x: 0, row: 2 },
+      { id: 'avoidance', lvl: 3, x: 0, row: 3 },
+    ],
+  },
+];
+const NODE_OF = {};
+for (const br of TREE) for (const n of br.nodes) NODE_OF[`${n.id}:${n.lvl}`] = n;
 
 function loadState() {
   try {
@@ -67,9 +107,19 @@ export function createUpgrades(debris, missions) {
     const lv = level(id);
     return lv >= b.costs.length ? null : b.costs[lv];
   };
+  const owns = (key) => {
+    const [id, lv] = key.split(':');
+    return level(id) >= Number(lv);
+  };
+  // What still blocks the next level of `id` in the tree (empty = nothing).
+  const missing = (id) => {
+    const n = NODE_OF[`${id}:${level(id) + 1}`];
+    return n && n.req ? n.req.filter((k) => !owns(k)) : [];
+  };
   const canBuy = (id) => {
     const b = BY_ID[id];
     if (b.requires && !unlocked(b.requires)) return false;
+    if (missing(id).length) return false;
     const c = nextCost(id);
     return c !== null && currency() >= c;
   };
@@ -81,5 +131,5 @@ export function createUpgrades(debris, missions) {
   };
   const nearWorkshop = (x, z) => Math.hypot(x - BASE.x, z - BASE.z) < WORKSHOP_R;
 
-  return { level, mul, unlocked, currency, nextCost, canBuy, buy, nearWorkshop };
+  return { level, mul, unlocked, currency, nextCost, canBuy, buy, nearWorkshop, owns, missing };
 }

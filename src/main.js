@@ -8,7 +8,7 @@ import { createAmbient } from './ambient.js';
 import { createBeams } from './beams.js';
 import { CHASSIS, SPEC, CHASSIS_LIST, WHEEL_DEFS, setChassis } from './chassis.js';
 import { VehicleSim, PLANET } from './physics.js';
-import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt, getSettlement } from './terrain.js';
+import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt, getSettlement, roadDist, ROAD_HALF } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createSeeds, seedsDelivered, LAB } from './seeds.js';
@@ -17,6 +17,7 @@ import { createJobs } from './jobs.js';
 import { createNPCs } from './npc.js';
 import { createTracks } from './tracks.js';
 import { createSand } from './sand.js';
+import { createKickup } from './kickup.js';
 import { createGrass } from './grass.js';
 import { createWater } from './water.js';
 import { createSplash } from './splash.js';
@@ -26,7 +27,7 @@ import { createStory } from './story.js';
 import { createRoadPosts } from './roadposts.js';
 import { createMissions } from './missions.js';
 import { createDebris } from './debris.js';
-import { createUpgrades, BRANCHES as UPGRADE_BRANCHES } from './upgrades.js';
+import { createUpgrades, BRANCHES as UPGRADE_BRANCHES, TREE as UPGRADE_TREE } from './upgrades.js';
 import { createDustTrail } from './dust.js';
 import { createSonar, MAX_BIAS as SONAR_MAX_BIAS } from './sonar.js';
 import { createMinimap3D } from './minimap3d.js';
@@ -43,13 +44,18 @@ const FOG_FAR = 1179;
 // ---------- solar rover ----------
 const SOL_SECONDS = 1080; // one Martian day, compressed (18 min)
 const BATTERY_MAX = 100;
-const DRAW_IDLE = 0.12; // %/s just being alive
-const DRAW_DRIVE = 0.62; // %/s at full power
+const DRAW_IDLE = 0.012; // %/s just being alive (a pack lasts hours parked)
 const CHARGE_PEAK = 1.5; // %/s with the wings open and the sun overhead
 // Time to unfold or stow; the crawler's array opens in two stages, so it takes longer.
 const PANEL_SECONDS = CHASSIS === 'crawler' || CHASSIS === 'hauler' ? 4.2 : 2.6;
 const LOW_BATTERY = 20;
-const BOOST_DRAW = 4.5; // Shift is fast but drinks the pack
+const BOOST_DRAW = 2.5; // Shift drinks the pack (on top of the extra speed it buys)
+// Per chassis (chassis.js `terrain`): the battery still reads 0–100 %, but a bigger
+// pack makes each percent worth more, and driving costs per metre covered rather
+// than per second — so a fast car no longer goes further on a charge just by being
+// fast. Below a walking pace it is still charged as if moving at it (climbing, digging).
+const TR = SPEC.terrain;
+const RANGE_KM = (BATTERY_MAX * TR.pack) / TR.perM / 1000; // full pack, cruising on the flat
 // Default camera: low behind the truck.
 // The crawler is 2.5 m longer; at the scout's distance it filled the frame.
 const CAM_BACK = { truck: 13, crawler: 16, hauler: 19, buggy: 12, speedster: 11.5 }[CHASSIS];
@@ -316,6 +322,11 @@ if (seeds) scene.add(seeds.group);
 const upgrades = createUpgrades(debris, missions);
 const sand = createSand();
 scene.add(sand.points);
+// Clods and stones flung up off the tyres (kickup.js).
+const kickup = createKickup();
+scene.add(kickup.mesh);
+const kickCtx = { wheels: WHEEL_DEFS.map((d) => ({ x: 0, z: 0, contact: false, R: d.R })), speed: 0, throttle: 0, fx: 0, fz: 1, offroad: 1 };
+let offroadK = 1;
 const grass = createGrass(); // no-op off Верданта
 scene.add(grass.group);
 const water = createWater(); // the river surface; also a no-op off Верданта
@@ -506,6 +517,7 @@ vehicle.root.add(cabLight);
 
 function toggleSand() {
   sand.setEnabled(!sand.enabled);
+  kickup.setEnabled(sand.enabled);
   const btn = document.getElementById('sandToggle');
   btn.textContent = sand.enabled ? 'Камінці: увімк' : 'Камінці: вимк';
   btn.classList.toggle('on', sand.enabled);
@@ -712,7 +724,10 @@ const chassisInfo = document.getElementById('chassisInfo');
 function showChassisInfo(c) {
   const kmh = (v) => Math.round(v * 3.6);
   const cruise = kmh(c.awdSplit ? c.vMaxRwd ?? 100 / 3.6 : c.vMax);
-  chassisInfo.innerHTML = `<b>${c.tag}</b> · ${c.driveLabel[0]} · ${cruise} км/год, форсаж ${kmh(c.vMaxBoost)}<br>${c.blurb}`;
+  const t = c.terrain;
+  const range = ((100 * t.pack) / t.perM / 1000).toFixed(1);
+  const off = t.offDrag > 3 ? 'лише дорога' : t.offRoll > 1.05 ? 'добре' : t.offRoll > 0.9 ? 'дуже добре' : 'будь-де';
+  chassisInfo.innerHTML = `<b>${c.tag}</b> · ${c.driveLabel[0]} · ${cruise} км/год, форсаж ${kmh(c.vMaxBoost)}<br>запас ходу ~${range} км · бездоріжжя: ${off} · брід до ${t.wade} м<br>${c.blurb}`;
 }
 for (const c of CHASSIS_LIST) {
   const btn = document.getElementById(`chassis-${c.id}`);
@@ -782,6 +797,7 @@ let autopilot = false;
 const keys = new Set();
 const DRIVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && map3dEl.classList.contains('big')) return closeMap();
   if (e.code === 'KeyF' || (photo && e.code === 'Escape')) return togglePhoto();
   if (photo) {
     if (e.code === 'Enter') return savePhoto();
@@ -794,6 +810,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyL') return cycleLamps();
   if (e.code === 'KeyK') return void toggleSound();
   if (e.code === 'KeyO') return menuEl.classList.toggle('show');
+  if (e.code === 'KeyU') { wsAuto = false; return toggleWorkshop(); }
   if (e.code === 'KeyR') return resetVehicle();
   if (e.code === 'KeyH') return resetVehicle(true);
   if (e.code === 'KeyM') return toggleMap();
@@ -817,6 +834,7 @@ window.addEventListener('blur', () => keys.clear());
 const odo = { trip: 0, total: 0, last: null, savedAt: 0 };
 try { odo.total = Number(localStorage.getItem('rover.odo')) || 0; } catch (e) { /* storage may be blocked */ }
 const hudOdoTrip = document.getElementById('odoTrip');
+const hudRange = document.getElementById('rangeLeft');
 const hudOdoTotal = document.getElementById('odoTotal');
 const hudMissions = document.getElementById('missionStat');
 const hudCarried = document.getElementById('carriedStat');
@@ -834,50 +852,115 @@ if (seeds) {
 }
 const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${Math.round(m)} м`);
 
-// ---------- workshop panel (shows up on its own near БЕТА) ----------
+// ---------- upgrade tree ----------
+// Open it anywhere (🛠 on the rover panel, or U) to plan; buying works only at
+// БЕТА's workshop, where it also pops up by itself when you pull in.
 const wsPanel = document.getElementById('workshop');
 const wsCurrency = document.getElementById('wsCurrency');
-const wsRows = document.getElementById('wsRows');
-const wsButtons = {};
-for (const b of UPGRADE_BRANCHES) {
-  const row = document.createElement('div');
-  row.className = 'wsRow';
-  const name = document.createElement('span');
-  name.className = 'wsName';
-  name.innerHTML = `${b.icon} ${b.label}<i>${b.hint}</i>`;
-  const lvl = document.createElement('b');
-  lvl.className = 'wsLevel';
-  const btn = document.createElement('button');
-  btn.addEventListener('click', () => {
-    if (upgrades.buy(b.id)) {
-      if (audio) audio.beep(1040, 0.1);
-      refreshWorkshop();
-    }
-  });
-  row.append(name, lvl, btn);
-  wsRows.appendChild(row);
-  wsButtons[b.id] = { btn, lvl };
+const wsWhere = document.getElementById('wsWhere');
+const wsTree = document.getElementById('wsTree');
+const upgBtn = document.getElementById('upgBtn');
+const BRANCH_BY_ID = Object.fromEntries(UPGRADE_BRANCHES.map((b) => [b.id, b]));
+const ROMAN = ['', 'I', 'II', 'III'];
+const wsNodes = []; // { n, el, branch }
+const wsBranches = []; // { grid, svg, nodes }
+let atWorkshop = false;
+let wsAuto = false;
+for (const br of UPGRADE_TREE) {
+  const box = document.createElement('div');
+  box.className = 'wsBranch';
+  box.innerHTML = `<h4>${br.title}</h4>`;
+  const grid = document.createElement('div');
+  grid.className = 'wsGrid';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  grid.appendChild(svg);
+  const nodes = [];
+  for (const n of br.nodes) {
+    const b = BRANCH_BY_ID[n.id];
+    const el = document.createElement('button');
+    el.className = 'wsNode';
+    el.style.gridColumn = String(n.x + 1);
+    el.style.gridRow = String(n.row + 1);
+    const lv = b.kind === 'levels' ? ` ${ROMAN[n.lvl]}` : '';
+    const val = b.fmt ? b.fmt(b.vals[n.lvl]) : b.short || b.hint;
+    el.innerHTML = `<span class="ic">${b.icon}</span><span class="nm">${b.label}${lv}</span><span class="vl">${val}</span><span class="ct"></span>`;
+    el.title = b.hint;
+    el.addEventListener('click', () => {
+      if (!atWorkshop || upgrades.level(n.id) !== n.lvl - 1) return;
+      if (upgrades.buy(n.id)) {
+        if (audio) audio.beep(1040, 0.1);
+        refreshWorkshop();
+      }
+    });
+    grid.appendChild(el);
+    const rec = { n, el };
+    nodes.push(rec);
+    wsNodes.push(rec);
+  }
+  box.appendChild(grid);
+  wsTree.appendChild(box);
+  wsBranches.push({ grid, svg, nodes });
 }
-function refreshWorkshop() {
-  wsCurrency.textContent = `мотлох: ${upgrades.currency()}`;
-  for (const b of UPGRADE_BRANCHES) {
-    const { btn, lvl } = wsButtons[b.id];
-    const level = upgrades.level(b.id);
-    lvl.textContent = b.fmt ? b.fmt(b.vals[level]) : level ? 'є' : 'нема';
-    const cost = upgrades.nextCost(b.id);
-    const locked = b.requires && !upgrades.unlocked(b.requires);
-    if (cost === null) {
-      btn.textContent = 'Максимум';
-      btn.disabled = true;
-      btn.classList.add('maxed');
-    } else {
-      btn.textContent = locked ? `Спершу ${BRANCH_BY_ID[b.requires].label}` : `Купити за ${cost}`;
-      btn.disabled = locked || !upgrades.canBuy(b.id);
-      btn.classList.remove('maxed');
+// Lines from each node up to what it needs, drawn once the grid has a size.
+function drawTreeLinks() {
+  for (const { grid, svg, nodes } of wsBranches) {
+    const g = grid.getBoundingClientRect();
+    if (!g.width) continue;
+    const at = Object.fromEntries(nodes.map((r) => [`${r.n.id}:${r.n.lvl}`, r]));
+    let html = '';
+    for (const r of nodes) {
+      const reqs = [...(r.n.req || [])];
+      if (r.n.lvl > 1 && !reqs.includes(`${r.n.id}:${r.n.lvl - 1}`) && at[`${r.n.id}:${r.n.lvl - 1}`] && !reqs.length) reqs.push(`${r.n.id}:${r.n.lvl - 1}`);
+      for (const k of reqs) {
+        const p = at[k];
+        if (!p) continue;
+        const a = p.el.getBoundingClientRect();
+        const c = r.el.getBoundingClientRect();
+        const x1 = a.left + a.width / 2 - g.left;
+        const y1 = a.bottom - g.top;
+        const x2 = c.left + c.width / 2 - g.left;
+        const y2 = c.top - g.top;
+        const lit = upgrades.owns(k);
+        const my = (y1 + y2) / 2;
+        html += `<path d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" fill="none" stroke="${lit ? 'rgba(143,224,138,0.75)' : 'rgba(255,210,170,0.25)'}" stroke-width="2"/>`;
+      }
     }
+    svg.innerHTML = html;
   }
 }
-const BRANCH_BY_ID = Object.fromEntries(UPGRADE_BRANCHES.map((b) => [b.id, b]));
+function refreshWorkshop() {
+  const cash = upgrades.currency();
+  wsCurrency.textContent = `мотлох: ${cash}`;
+  wsWhere.textContent = atWorkshop ? 'Ти в майстерні БЕТА — клікни на доступне покращення, щоб купити' : 'Купувати можна лише в майстерні на базі БЕТА — тут можна спланувати';
+  wsWhere.classList.toggle('here', atWorkshop);
+  let affordable = 0;
+  for (const { n, el } of wsNodes) {
+    const b = BRANCH_BY_ID[n.id];
+    const lv = upgrades.level(n.id);
+    const owned = lv >= n.lvl;
+    const next = lv === n.lvl - 1;
+    const blocked = next && (upgrades.missing(n.id).length > 0 || (b.requires && !upgrades.unlocked(b.requires)));
+    const open = next && !blocked;
+    const cost = b.costs[n.lvl - 1];
+    const ct = el.querySelector('.ct');
+    ct.textContent = owned ? '✓ є' : `${cost} мотлоху`;
+    el.classList.toggle('owned', owned);
+    el.classList.toggle('open', open);
+    el.classList.toggle('locked', !owned && !open);
+    el.classList.toggle('poor', open && cash < cost);
+    el.classList.toggle('buy', open && cash >= cost && atWorkshop);
+    if (open && cash >= cost) affordable++;
+  }
+  upgBtn.classList.toggle('pulse', affordable > 0 && atWorkshop);
+  if (wsPanel.classList.contains('show')) drawTreeLinks();
+}
+function toggleWorkshop(on = !wsPanel.classList.contains('show')) {
+  wsPanel.classList.toggle('show', on);
+  if (on) refreshWorkshop();
+}
+upgBtn.addEventListener('click', () => toggleWorkshop());
+document.getElementById('wsClose').addEventListener('click', () => toggleWorkshop(false));
+window.addEventListener('resize', () => { if (wsPanel.classList.contains('show')) drawTreeLinks(); });
 refreshWorkshop();
 document.getElementById('odoRow').addEventListener('click', () => { odo.trip = 0; });
 function stepOdometer(t) {
@@ -1010,7 +1093,7 @@ const minimap = createMinimap3D(
 function updateRouteInfo() {
   routeInfo.textContent = route.length
     ? `Маршрут: ${route.length} ${route.length === 1 ? 'точка' : 'точок'}`
-    : 'Маршрут порожній — клацай по карті, щоб ставити точки';
+    : 'Маршрут порожній — клацай по карті, щоб ставити точки; тягни — рух, коліщатко — зум';
   minimap.setRoute(route);
 }
 
@@ -1035,6 +1118,7 @@ function closeMap() {
 }
 minimap.setOnTapSmall(openMap);
 document.getElementById('mapClose').addEventListener('click', closeMap);
+document.getElementById('mapCenter').addEventListener('click', () => minimap.recenter());
 
 function toggleMap() {
   const hidden = map3dEl.classList.toggle('hidden');
@@ -1308,6 +1392,12 @@ let camY = sim.pos.y;
 let flippedFor = 0;
 let camMode = 0;
 let orbitAngle = 0;
+const ORBIT_IDLE = 4; // s without camera input before the orbit camera circles again
+let orbitHeld = false;
+let orbitIdle = ORBIT_IDLE;
+let orbitSpin = 1;
+controls.addEventListener('start', () => { orbitHeld = true; orbitIdle = 0; });
+controls.addEventListener('end', () => { orbitHeld = false; orbitIdle = 0; });
 const btnCamera = document.getElementById('camBtn');
 const CAM_LABEL = { chase: 'ближня', far: 'дальня', top: 'згори', orbit: 'оберт' };
 function presetOffset(mode, yaw) {
@@ -1317,13 +1407,18 @@ function presetOffset(mode, yaw) {
 function setCamMode(i) {
   camMode = ((i % CAM_MODES.length) + CAM_MODES.length) % CAM_MODES.length;
   const mode = CAM_MODES[camMode];
-  controls.enabled = mode === 'chase' || mode === 'far';
+  controls.enabled = mode !== 'top';
   if (mode === 'chase' || mode === 'far') {
     camera.position.copy(camTarget).add(presetOffset(mode, camYaw));
     controls.target.copy(camTarget);
     controls.update();
   } else if (mode === 'orbit') {
     orbitAngle = camYaw;
+    orbitIdle = ORBIT_IDLE;
+    orbitSpin = 1;
+    camera.position.set(camTarget.x - Math.sin(orbitAngle) * CAM_ORBIT_RADIUS, camTarget.y + CAM_ORBIT_HEIGHT, camTarget.z - Math.cos(orbitAngle) * CAM_ORBIT_RADIUS);
+    controls.target.copy(camTarget);
+    controls.update();
   }
   btnCamera.textContent = `Камера: ${CAM_LABEL[mode]} (C)`;
 }
@@ -1454,7 +1549,7 @@ function frame() {
   // The sonar itself is a workshop unlock — no scan, no pings until bought (upgrades
   // is planet-aware: always off on the Moon, always on on Верданта, see upgrades.js).
   if (upgrades.unlocked('sonar')) {
-    sonarScan = sonar.update(dt, sim.pos.x, sim.pos.z, sim.yaw());
+    sonarScan = sonar.update(dt, sim.pos.x, sim.pos.z, sim.yaw(), upgrades.mul('avoidance') || 30);
     if (sonarScan.warnObstacle && !sonarWarned) {
       sonarWarned = true;
       flash(`Сонар: перешкода за ${Math.round(sonarScan.warnObstacle.d)} м`);
@@ -1510,12 +1605,22 @@ function frame() {
   } else if (camModeName === 'top') {
     camera.position.set(camTarget.x, camTarget.y + CAM_TOP_HEIGHT, camTarget.z + 0.01);
   } else {
-    orbitAngle += dt * CAM_ORBIT_SPEED;
-    camera.position.set(
-      camTarget.x - Math.sin(orbitAngle) * CAM_ORBIT_RADIUS,
-      camTarget.y + CAM_ORBIT_HEIGHT,
-      camTarget.z - Math.cos(orbitAngle) * CAM_ORBIT_RADIUS
-    );
+    // The player can grab the orbit camera (drag, zoom); it then just follows the
+    // rover from wherever they left it, and after a few idle seconds starts circling
+    // again from that very spot, easing its distance and height back to the preset.
+    camOffset.copy(camera.position).sub(controls.target);
+    if (!orbitHeld) orbitIdle += dt;
+    if (orbitHeld || orbitIdle < ORBIT_IDLE) {
+      orbitSpin = 0;
+    } else {
+      orbitSpin = Math.min(1, orbitSpin + dt / 2); // spin up gently, not with a jerk
+      const flat = Math.hypot(camOffset.x, camOffset.z);
+      const ang = Math.atan2(-camOffset.x, -camOffset.z) + dt * CAM_ORBIT_SPEED * orbitSpin;
+      const r = damp(flat, CAM_ORBIT_RADIUS, 0.4 * orbitSpin, dt);
+      const h = damp(camOffset.y, CAM_ORBIT_HEIGHT, 0.4 * orbitSpin, dt);
+      camOffset.set(-Math.sin(ang) * r, h, -Math.cos(ang) * r);
+    }
+    camera.position.copy(camTarget).add(camOffset);
   }
   controls.target.copy(camTarget);
   controls.update();
@@ -1535,7 +1640,15 @@ function frame() {
   // Wading costs you: water piles up against the hull and the wheels lose bite. This
   // rides the same runtime multipliers the workshop upgrades drive, so the feel of
   // water needs nothing added to the physics itself.
-  const wade = Math.min(1, waterDepthAt(sim.pos.x, sim.pos.z) / 1.1);
+  // Off the graded road the big machines just roll on; a low road car bogs down.
+  {
+    const rd = roadDist(sim.pos.x, sim.pos.z);
+    const off = clamp((rd - ROAD_HALF * 0.6) / 24, 0, 1);
+    offroadK = off;
+    sim.rollMul = (0.7 + 0.3 * off) * (1 + (TR.offRoll - 1) * off);
+    sim.dragMul = 1 + (TR.offDrag - 1) * off;
+  }
+  const wade = Math.min(1, waterDepthAt(sim.pos.x, sim.pos.z) / TR.wade);
   if (wade > 0) {
     sim.powerMul *= 1 - 0.5 * wade;
     sim.gripMul *= 1 - 0.28 * wade;
@@ -1580,10 +1693,11 @@ function frame() {
   vehicle.setPanels(power.panels);
 
   // Charging needs the wings fully open and the sun above the horizon.
-  power.charge = power.panels > 0.99 ? CHARGE_PEAK * chargeMul * Math.max(0, sunDir.y) * (1 - 0.75 * weather.w) : 0;
+  power.charge = power.panels > 0.99 ? (CHARGE_PEAK * TR.solar / TR.pack) * chargeMul * Math.max(0, sunDir.y) * (1 - 0.75 * weather.w) : 0;
   // Rear-only drive spins up half the drivetrain, so it costs less to hold the same
   // throttle — the payoff for giving up front-axle traction above AWD_UP.
-  power.draw = (DRAW_IDLE + DRAW_DRIVE * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8)) * drawMul;
+  const moveV = Math.max(3, Math.abs(sim.speed));
+  power.draw = ((DRAW_IDLE * TR.idle + TR.perM * moveV * Math.abs(sim.cmd.throttle) * (sim.cmd.boost ? BOOST_DRAW : 1) * (sim.awd ? 1 : 0.8)) / TR.pack) * drawMul;
   const wasEmpty = power.battery <= 0;
   power.battery = clamp(power.battery + (power.charge - power.draw) * dt, 0, BATTERY_MAX);
   if (!wasEmpty && power.battery <= 0) {
@@ -1592,6 +1706,7 @@ function frame() {
   }
 
   const pct = (power.battery / BATTERY_MAX) * 100;
+  hudRange.textContent = `~${((RANGE_KM / drawMul) * pct / 100).toFixed(1)} км`;
   hudBatteryBar.style.width = `${pct}%`;
   hudBatteryBar.style.background = pct < LOW_BATTERY ? '#ff4530' : power.charge > power.draw ? '#4fe06a' : '#ff9420';
   hudBattery.textContent = `${pct.toFixed(0)}%`;
@@ -1654,6 +1769,21 @@ function frame() {
   for (const l of markerLights) l.intensity = lampsLit ? 14 : 0;
 
   tracks.update(W.map((w) => ({ x: w.sim.cx, z: w.sim.cz, contact: w.sim.contact && waterDepthAt(w.sim.cx, w.sim.cz) < 0.05 })));
+  {
+    W.forEach((w, i) => {
+      const k = kickCtx.wheels[i];
+      k.x = w.sim.cx;
+      k.z = w.sim.cz;
+      k.contact = w.sim.contact;
+    });
+    const yw = sim.yaw();
+    kickCtx.fx = Math.sin(yw);
+    kickCtx.fz = Math.cos(yw);
+    kickCtx.speed = sim.speed;
+    kickCtx.throttle = sim.cmd.throttle;
+    kickCtx.offroad = offroadK;
+    kickup.update(dt, kickCtx);
+  }
   // Grime: builds up over a few minutes of driving (faster in a dust storm), washed
   // off by rain and by fording the river. Kept across reloads.
   {
@@ -1810,8 +1940,12 @@ function frame() {
     hudDebris.textContent = `${debris.collectedCount()}/${debris.total}`;
 
     const nearWs = upgrades.nearWorkshop(sim.pos.x, sim.pos.z);
-    wsPanel.classList.toggle('show', nearWs);
-    if (nearWs) refreshWorkshop();
+    if (nearWs !== atWorkshop) {
+      atWorkshop = nearWs;
+      // Pulling in opens it; driving off closes it only if it opened itself.
+      if (nearWs) { toggleWorkshop(true); wsAuto = true; } else if (wsAuto) { toggleWorkshop(false); wsAuto = false; }
+      refreshWorkshop();
+    } else if (nearWs && wsPanel.classList.contains('show')) refreshWorkshop();
   }
 
   if (audio) {
@@ -1938,6 +2072,6 @@ try {
 } catch (e) { /* storage may be blocked */ }
 
 // debug hook: inspect state and scrub the sol from the console
-window.game = { applyPreset, dirt, tracks, weather, contactShadow, vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
+window.game = { kickup, applyPreset, dirt, tracks, weather, contactShadow, vehicle, landmarks, jobs, npcs, roadPosts, missions, debris, upgrades, dust, sonar, get sonarScan() { return sonarScan; }, sim, camera, controls, power, renderer, scene, terrain, post, sunShadows, ambient, route, minimap, auto, sand, grass, water, splash, setTime: (t) => { timeOfDay = t % 1; }, get timeOfDay() { return timeOfDay; } };
 document.getElementById('loading').classList.add('hidden');
 frame();

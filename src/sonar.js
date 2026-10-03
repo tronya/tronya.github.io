@@ -5,18 +5,18 @@ import { findObstacles, groundHeight } from './terrain.js';
 // just the ping markers over whatever it's found. Anything tall enough to actually
 // block driving (rocks over OBSTACLE_MIN_H) lights up as a ping, coloured by how
 // urgent it is. Two separate radii matter: WARN_R just flags it (HUD + a beep),
-// AVOID_R is close enough that the autopilot itself leans the route around it
+// the avoidance range (a workshop level, 30/50/80 m) is where the autopilot leans the route around it
 // (see `avoidBias`).
 
-const RANGE = 40;
+const RANGE = 40; // scan reach at the bottom avoidance level; grows with it (see update)
 const CONE = THREE.MathUtils.degToRad(55); // half-angle of the forward detection cone
 const OBSTACLE_MIN_H = 0.5; // a rock shorter than this the rover can just drive over
 const WARN_R = 25;
-const AVOID_R = 15; // base — a big boulder gets noticed well past this, see `reach` below
+const AVOID_LEVEL0 = 30; // the bottom avoidance level, in metres; the warning radius grows past it
 const AVOID_CORRIDOR = 3.2; // lateral half-width that counts as "in the way"
 export const MAX_BIAS = THREE.MathUtils.degToRad(42);
 const SCAN_EVERY = 0.08; // seconds between obstacle scans
-const PING_POOL = 14;
+const PING_POOL = 24;
 
 function makePingTexture() {
   const c = document.createElement('canvas');
@@ -60,12 +60,20 @@ export function createSonar(mount) {
   // otherwise keep whichever way was already committed to.
   let dodgeCommit = 1;
 
-  function update(dt, x, z, yaw) {
+  // avoidRange: how far ahead АВТОУНИКНЕННЯ starts leaning round things (workshop
+  // level, 30/50/80 m). The scan, the warning and the steering all stretch with it.
+  function update(dt, x, z, yaw, avoidRange = AVOID_LEVEL0) {
     scanClock -= dt;
     if (scanClock > 0) return lastScan;
     scanClock = SCAN_EVERY;
+    const k = Math.max(1, avoidRange / AVOID_LEVEL0);
+    const range = Math.max(RANGE, avoidRange + 12);
+    const warnR = WARN_R * Math.sqrt(k);
+    // Steering starts at the full avoidance range for a big boulder, a bit closer
+    // for a small rock that needs less room to get round.
+    const reachOf = (r) => avoidRange * (0.6 + 0.4 * clamp01(r / 2));
 
-    findObstacles(x, z, RANGE, OBSTACLE_MIN_H, found);
+    findObstacles(x, z, range, OBSTACLE_MIN_H, found);
     const fwd = { x: Math.sin(yaw), z: Math.cos(yaw) };
     const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
     let pingN = 0;
@@ -78,11 +86,11 @@ export function createSonar(mount) {
       const dx = o.x - x, dz = o.z - z;
       const along = dx * fwd.x + dz * fwd.z;
       const lateral = dx * right.x + dz * right.z;
-      if (along <= 0 || Math.abs(lateral) > o.r + RANGE * Math.tan(CONE)) continue;
+      if (along <= 0 || Math.abs(lateral) > o.r + range * Math.tan(CONE)) continue;
       const inPath = Math.abs(lateral) < AVOID_CORRIDOR + o.r;
 
       if (pingN < pings.length) {
-        const band = o.d <= AVOID_R + o.r * 4.2 && inPath ? RED : o.d <= WARN_R && inPath ? YELLOW : GREEN;
+        const band = o.d <= reachOf(o.r) && inPath ? RED : o.d <= warnR && inPath ? YELLOW : GREEN;
         const s = pings[pingN++];
         s.position.set(o.x, groundHeight(o.x, o.z) + 0.4, o.z);
         s.material.color.copy(band);
@@ -90,7 +98,7 @@ export function createSonar(mount) {
         s.visible = true;
       }
 
-      if (inPath && o.d <= WARN_R && (!warnObstacle || o.d < warnObstacle.d)) warnObstacle = o;
+      if (inPath && o.d <= warnR && (!warnObstacle || o.d < warnObstacle.d)) warnObstacle = o;
 
       // A car-sized boulder needs noticing — and steering around — well before it
       // fills the windscreen, not just inside the last 15 m. Its own "reach" grows
@@ -99,7 +107,7 @@ export function createSonar(mount) {
       // while there's still room to make it, not squeezed into the last couple of
       // metres — that's what almost tipped the rover over reacting too late.
       if (inPath) {
-        const reach = AVOID_R + o.r * 4.2;
+        const reach = reachOf(o.r);
         if (o.d <= reach) {
           const centered = clamp01(1 - Math.abs(lateral) / (AVOID_CORRIDOR + o.r));
           const urgency = centered * Math.pow(clamp01(1 - o.d / reach), 0.4);

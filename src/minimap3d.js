@@ -5,8 +5,8 @@ import { PLANET } from './planet.js';
 
 // A small, real 3D relief of the whole crossing, built once from the same height
 // field the ground itself uses. Parked in the corner it's a north-up close-up that
-// follows the rover; a tap opens it into a big, orbitable dialog (drag to
-// rotate, wheel to zoom) where tapping the ground — a tap, not a drag — drops a
+// follows the rover; a tap opens it into a big dialog, the same north-up view (drag
+// to pan, wheel to zoom) where tapping the ground — a tap, not a drag — drops a
 // waypoint there. Lit by a fixed lamp rather than the sol cycle, so it reads the
 // same whether it's day or night outside.
 
@@ -40,7 +40,7 @@ function elevColor(hi, out) {
 
 // canvas: the WebGL view. overlay: a plain 2D canvas stacked exactly on top of it.
 export function createMinimap3D(canvas, overlay, missionModules = [], extraSites = []) {
-  const PAD = 240;
+  const PAD = 1400; // well past the road, so panning the big map still finds ground
   const x0 = ROUTE_BOUNDS.x0 - PAD;
   const x1 = ROUTE_BOUNDS.x1 + PAD;
   const z0 = ROUTE_BOUNDS.z0 - PAD;
@@ -118,6 +118,8 @@ export function createMinimap3D(canvas, overlay, missionModules = [], extraSites
   scene.add(sun, new THREE.AmbientLight(LOOK.ambient, 1.4));
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 20, 12000);
+  camera.far = Math.max(12000, orbitDist * 1.5);
+  camera.updateProjectionMatrix();
   camera.position.set(
     center.x,
     orbitDist * Math.sin(ORBIT_ELEV),
@@ -153,10 +155,37 @@ export function createMinimap3D(canvas, overlay, missionModules = [], extraSites
   let downAt = null;
   let onAdd = null;
   let onTapSmall = null;
+  // Opened big, it's the same north-up view as the corner map, just larger: drag to
+  // pan, wheel to zoom. It follows the rover until you drag it somewhere else.
+  const view = { x: 0, z: 0, h: 2600, follow: true };
+  let dragFrom = null;
+  const unitsPerPx = () => (2 * view.h * Math.tan(THREE.MathUtils.degToRad(FOV / 2))) / Math.max(1, canvas.clientHeight);
   canvas.addEventListener('pointerdown', (e) => {
     downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+    if (big) {
+      dragFrom = { x: e.clientX, y: e.clientY };
+      canvas.setPointerCapture(e.pointerId);
+    }
   });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!big || !dragFrom) return;
+    const dx = e.clientX - dragFrom.x;
+    const dy = e.clientY - dragFrom.y;
+    if (view.follow && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6) return;
+    view.follow = false;
+    const u = unitsPerPx();
+    // Screen right is world -X and screen up is world +Z in this north-up view.
+    view.x += dx * u;
+    view.z += dy * u;
+    dragFrom = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('wheel', (e) => {
+    if (!big) return;
+    e.preventDefault();
+    view.h = THREE.MathUtils.clamp(view.h * Math.exp(e.deltaY * 0.0012), 300, orbitDist * 0.9);
+  }, { passive: false });
   canvas.addEventListener('pointerup', (e) => {
+    dragFrom = null;
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     const held = performance.now() - downAt.t;
@@ -272,7 +301,6 @@ export function createMinimap3D(canvas, overlay, missionModules = [], extraSites
       label(fmtDist(d), s.x + r + 4 * k, s.y);
       return;
     }
-    if (big) return;
     // Off the close-up: slide along the line from the centre until it meets the
     // rim, then draw the icon there with a little arrow pointing on out.
     const cx = w / 2;
@@ -358,17 +386,22 @@ export function createMinimap3D(canvas, overlay, missionModules = [], extraSites
     octx.stroke();
     octx.restore();
 
-    if (!big) {
-      // North tick, since the close-up is always north-up.
-      label('Пн ▲', w - 8 * k, 12 * k, 'right');
-    }
+    // North tick: both views are always north-up.
+    if (big) label('Пн ▲', w / 2, 20 * k, 'center');
+    else label('Пн ▲', w - 8 * k, 12 * k, 'right');
+    if (big) label(`масштаб: ${fmtDist(unitsPerPx() * 100)} на 100 px`, 10 * k, 20 * k);
   }
 
   function update(sim, dt) {
+    camera.up.set(0, 0, 1);
     if (big) {
-      controls.update();
+      if (view.follow) {
+        view.x = sim.pos.x;
+        view.z = sim.pos.z;
+      }
+      camera.position.set(view.x, view.h, view.z);
+      camera.lookAt(view.x, 0, view.z);
     } else {
-      camera.up.set(0, 0, 1);
       camera.position.set(sim.pos.x, terrainHeight(sim.pos.x, sim.pos.z) + SMALL_H, sim.pos.z);
       camera.lookAt(sim.pos.x, 0, sim.pos.z);
     }
@@ -385,14 +418,12 @@ export function createMinimap3D(canvas, overlay, missionModules = [], extraSites
     resize,
     setBig(v) {
       big = v;
-      controls.enabled = v;
-      if (v) {
-        // Back to the whole-crossing orbit, Y-up as OrbitControls expects.
-        camera.up.set(0, 1, 0);
-        camera.position.set(center.x, orbitDist * Math.sin(ORBIT_ELEV), center.z - orbitDist * Math.cos(ORBIT_ELEV));
-        controls.target.copy(center);
-        controls.update();
-      }
+      controls.enabled = false;
+      if (v) view.follow = true;
+    },
+    // Back onto the rover after panning away.
+    recenter() {
+      view.follow = true;
     },
     setOnAdd(fn) {
       onAdd = fn;

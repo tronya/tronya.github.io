@@ -227,6 +227,8 @@ export class VehicleSim {
     this.powerMul = 1; // set by the workshop motor upgrade — not touched by reset()
     this.suspMul = 1; // set by the workshop suspension upgrade — how hard a hit it absorbs
     this.gripMul = 1; // set by the workshop wheels upgrade — tyre grip on top of MU
+    this.rollMul = 1; // set per frame by main.js: off-road rolling resistance for this chassis
+    this.dragMul = 1; // and churn through loose regolith
     this.wheels = WHEEL_DEFS.map((w) => ({
       ...w, L: SUSP.Lstatic, Lprev: SUSP.Lstatic, wasContact: false, contact: false, Fs: 0, comp: 0,
       cx: 0, cz: 0, g: 0, gPrev: 0, blocked: 0, blockSide: 0, vx: 0, vy: 0, spinRate: 0, dir: V3(), n: V3(), rel: V3(),
@@ -620,7 +622,7 @@ export class VehicleSim {
       let Fx;
       if (cmd.parked) Fx = -grip * Math.tanh(vx / 0.05);
       else {
-        const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * N + (DRAG_V2 * vx * vx) / NW;
+        const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * this.rollMul * N + (DRAG_V2 * this.dragMul * vx * vx) / NW;
         const isDriven = this.awd || !w.front;
         const drive = isDriven ? this.driveForce(cmd.throttle, speed) / driven : 0;
         Fx = drive - resist * Math.tanh(vx / 0.4);
