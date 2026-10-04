@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lamp } from './glow.js';
 import { PLANET } from './planet.js';
-import { getLandmarks, groundHeight } from './terrain.js';
+import { getLandmarks, groundHeight, BRIDGES } from './terrain.js';
 import { settlementLayout } from './landmark-types.js';
 
 // The buildings, wrecks and odd structures terrain.js scatters across each planet.
@@ -478,6 +478,76 @@ function buildSettlement(g) {
   }
 }
 
+// A steel span across the canyon (terrain.js plans it and owns its physics). Built
+// in world space along the deck: segments that follow the camber, two box girders
+// under it, orange rails on posts, piers down to the canyon floor, and a concrete
+// block at each end.
+function buildBridge(g, b) {
+  const yaw = Math.atan2(b.ux, b.uz);
+  const N = Math.max(8, Math.round(b.len / 6));
+  const at = (t) => {
+    const x = b.ax + (b.bx - b.ax) * t;
+    const z = b.az + (b.bz - b.az) * t;
+    const ramp = Math.min(1, (t * b.len) / 5, ((1 - t) * b.len) / 5);
+    return { x, z, y: b.ay + (b.by - b.ay) * t + Math.sin(Math.PI * t) * Math.min(3, b.len * 0.02) + 0.35 * ramp };
+  };
+  const piece = (w, h, d, mat, p, pitch, side = 0, dy = 0) => {
+    const holder = new THREE.Group();
+    holder.position.set(p.x + b.uz * side, p.y + dy, p.z - b.ux * side);
+    holder.rotation.order = 'YXZ';
+    holder.rotation.y = yaw;
+    holder.rotation.x = -pitch;
+    holder.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat));
+    g.add(holder);
+  };
+  for (let i = 0; i < N; i++) {
+    const p0 = at(i / N);
+    const p1 = at((i + 1) / N);
+    const seg = Math.hypot(b.len / N, p1.y - p0.y);
+    const pitch = Math.atan2(p1.y - p0.y, b.len / N);
+    const mid = { x: (p0.x + p1.x) / 2, z: (p0.z + p1.z) / 2, y: (p0.y + p1.y) / 2 };
+    piece(b.w, 0.5, seg + 0.04, M.grey, mid, pitch, 0, -0.25); // deck plate
+    for (const sd of [-1, 1]) {
+      piece(0.7, 1.8, seg + 0.04, M.dark, mid, pitch, sd * (b.w / 2 - 1.2), -1.4); // girders
+      piece(0.12, 0.12, seg + 0.04, M.orange, mid, pitch, sd * (b.w / 2 + 0.2), 1.15); // top rail
+      piece(0.08, 0.08, seg + 0.04, M.orange, mid, pitch, sd * (b.w / 2 + 0.2), 0.6); // mid rail
+      piece(0.35, 0.3, seg + 0.04, M.metal, mid, pitch, sd * (b.w / 2 + 0.05), 0.05); // kerb
+    }
+  }
+  // Posts, with a small amber lamp every few.
+  for (let i = 0; i <= N; i++) {
+    const p = at(i / N);
+    for (const sd of [-1, 1]) {
+      piece(0.14, 1.2, 0.14, M.metal, p, 0, sd * (b.w / 2 + 0.2), 0.6);
+      if (i % 3 === 0) piece(0.22, 0.12, 0.22, M.amber, p, 0, sd * (b.w / 2 + 0.2), 1.27);
+    }
+  }
+  // Piers down to the canyon floor, with a cross-beam under the girders.
+  for (const pr of b.piers || []) {
+    const t = ((pr.x - b.ax) * b.ux + (pr.z - b.az) * b.uz) / b.len;
+    const top = at(t).y - 2.3;
+    const foot = groundHeight(pr.x, pr.z) - 1;
+    const h = top - foot;
+    for (const sd of [-1, 1]) piece(1.3, h, 1.6, M.grey, { x: pr.x, z: pr.z, y: foot + h / 2 }, 0, sd * (b.w / 2 - 1.2));
+    piece(b.w, 1.0, 1.8, M.dark, { x: pr.x, z: pr.z, y: top - 0.2 }, 0);
+    // X-bracing between the two legs.
+    const holder = new THREE.Group();
+    holder.position.set(pr.x, foot + h / 2, pr.z);
+    holder.rotation.y = yaw;
+    for (const sg of [-1, 1]) {
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.3, Math.hypot(h, b.w - 2.4), 0.3), M.metal);
+      brace.rotation.z = sg * Math.atan2(b.w - 2.4, h);
+      holder.add(brace);
+    }
+    g.add(holder);
+  }
+  // Abutments: concrete blocks the deck sits on at each rim.
+  for (const t of [0, 1]) {
+    const p = at(t);
+    piece(b.w + 1.6, 3, 4, M.grey, { x: p.x, z: p.z, y: p.y - 1.9 }, 0);
+  }
+}
+
 // Merge a built group into one mesh per material, world-placed.
 function bake(src) {
   src.updateMatrixWorld(true);
@@ -564,6 +634,14 @@ export function createLandmarks() {
     group.add(baked);
     return { lm, mesh: baked };
   });
+  for (const b of BRIDGES) {
+    const g = new THREE.Group();
+    buildBridge(g, b);
+    const baked = bake(g);
+    baked.visible = false;
+    group.add(baked);
+    list.push({ lm: { x: (b.ax + b.bx) / 2, z: (b.az + b.bz) / 2, type: { id: 'bridge' } }, mesh: baked });
+  }
 
   return {
     group,

@@ -7,8 +7,8 @@ import { createSunShadows } from './sunshadow.js';
 import { createAmbient } from './ambient.js';
 import { createBeams } from './beams.js';
 import { CHASSIS, SPEC, CHASSIS_LIST, WHEEL_DEFS, setChassis } from './chassis.js';
-import { VehicleSim, PLANET } from './physics.js';
-import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt, getSettlement, roadDist, ROAD_HALF } from './terrain.js';
+import { VehicleSim, HoverSim, PLANET } from './physics.js';
+import { createTerrain, groundHeight, terrainHeight, BASES, roadSpawn, setViewScale, waterDepthAt, getSettlement, roadDist, ROAD_HALF, deckHeight } from './terrain.js';
 import { buildBase } from './base.js';
 import { createAudio } from './audio.js';
 import { createSeeds, seedsDelivered, LAB } from './seeds.js';
@@ -47,7 +47,7 @@ const BATTERY_MAX = 100;
 const DRAW_IDLE = 0.012; // %/s just being alive (a pack lasts hours parked)
 const CHARGE_PEAK = 1.5; // %/s with the wings open and the sun overhead
 // Time to unfold or stow; the crawler's array opens in two stages, so it takes longer.
-const PANEL_SECONDS = CHASSIS === 'crawler' || CHASSIS === 'hauler' ? 4.2 : 2.6;
+const PANEL_SECONDS = CHASSIS === 'crawler' || CHASSIS === 'hauler' || CHASSIS === 'galatea' ? 4.2 : 2.6;
 const LOW_BATTERY = 20;
 const BOOST_DRAW = 2.5; // Shift drinks the pack (on top of the extra speed it buys)
 // Per chassis (chassis.js `terrain`): the battery still reads 0–100 %, but a bigger
@@ -58,8 +58,8 @@ const TR = SPEC.terrain;
 const RANGE_KM = (BATTERY_MAX * TR.pack) / TR.perM / 1000; // full pack, cruising on the flat
 // Default camera: low behind the truck.
 // The crawler is 2.5 m longer; at the scout's distance it filled the frame.
-const CAM_BACK = { truck: 13, crawler: 16, hauler: 19, buggy: 12, speedster: 11.5 }[CHASSIS];
-const CAM_UP = { truck: 2, crawler: 2.6, hauler: 3.4, buggy: 2, speedster: 1.6 }[CHASSIS];
+const CAM_BACK = { truck: 13, crawler: 16, hauler: 19, buggy: 12, speedster: 11.5, galatea: 16, glider: 12 }[CHASSIS];
+const CAM_UP = { truck: 2, crawler: 2.6, hauler: 3.4, buggy: 2, speedster: 1.6, galatea: 3, glider: 2.2 }[CHASSIS];
 // Cinematic camera modes, cycled with C. Chase/far still turn with the truck's
 // heading and can be dragged/zoomed by hand (same trick as the default camera);
 // top-down and orbit are fully automatic and lock out manual control.
@@ -337,7 +337,7 @@ const flashback = createFlashback(); // the Гермес-1 wreck; only exists on
 scene.add(flashback.group);
 scene.add(tracks.mesh);
 
-const sim = new VehicleSim();
+const sim = SPEC.flight ? new HoverSim() : new VehicleSim(); // the glider flies, everything else drives
 {
   const sp = roadSpawn(false);
   sim.reset(sp.x, sp.z, sp.yaw);
@@ -369,6 +369,7 @@ const dustTex = makeDustTexture();
 const contactShadow = (() => {
   let wx = 0, wz = 0;
   for (const w of WHEEL_DEFS) { wx = Math.max(wx, Math.abs(w.x)); wz = Math.max(wz, Math.abs(w.z)); }
+  if (!WHEEL_DEFS.length) { wx = SPEC.box.w / 2 - 0.6; wz = SPEC.box.l / 2 - 0.8; } // the glider: its hull
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const cx = c.getContext('2d');
@@ -798,6 +799,7 @@ const keys = new Set();
 const DRIVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && map3dEl.classList.contains('big')) return closeMap();
+  if (SPEC.flight && e.ctrlKey) e.preventDefault(); // Ctrl is the glider's "down", not a shortcut
   if (e.code === 'KeyF' || (photo && e.code === 'Escape')) return togglePhoto();
   if (photo) {
     if (e.code === 'Enter') return savePhoto();
@@ -1378,7 +1380,9 @@ function readInput(t) {
     // Holding both keys is the way back to straight ahead.
     centre: left && right,
     brake: keys.has('Space') ? 1 : 0,
-    boost: keys.has('ShiftLeft') || keys.has('ShiftRight'),
+    // The glider spends Shift and Ctrl on height instead: up and down.
+    boost: !SPEC.flight && (keys.has('ShiftLeft') || keys.has('ShiftRight')),
+    climb: SPEC.flight ? (has('ShiftLeft', 'ShiftRight') ? 1 : 0) - (has('ControlLeft', 'ControlRight') ? 1 : 0) : 0,
   };
 }
 
@@ -1571,6 +1575,13 @@ function frame() {
     terrain.update(sim.pos.x, sim.pos.z, 3, lampLevel() >= 3 ? { dx: Math.sin(yw), dz: Math.cos(yw) } : null);
   }
   sim.origin(origin);
+  if (SPEC.flight) {
+    // Flames: the lift jets work harder climbing and ease off sinking; the turbines
+    // roar with the throttle.
+    const climbIn = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 1 : 0) - (keys.has('ControlLeft') || keys.has('ControlRight') ? 1 : 0);
+    const liftK = power.battery > 0 ? clamp(0.55 + 0.1 * sim.vel.y + 0.35 * climbIn, 0.15, 1.4) : 0;
+    vehicle.setThrust(liftK, power.battery > 0 ? Math.max(0, sim.cmd.throttle) : 0);
+  }
   vehicle.root.position.copy(origin);
   vehicle.root.quaternion.copy(sim.quat);
   vehicle.setSteer(sim.cmd.steer, sim.speed);
@@ -1643,7 +1654,9 @@ function frame() {
   // Off the graded road the big machines just roll on; a low road car bogs down.
   {
     const rd = roadDist(sim.pos.x, sim.pos.z);
-    const off = clamp((rd - ROAD_HALF * 0.6) / 24, 0, 1);
+    // A bridge deck is paved: no bogging down on it.
+    const onDeck = Math.abs(sim.pos.y - deckHeight(sim.pos.x, sim.pos.z)) < 3;
+    const off = onDeck ? 0 : clamp((rd - ROAD_HALF * 0.6) / 24, 0, 1);
     offroadK = off;
     sim.rollMul = (0.7 + 0.3 * off) * (1 + (TR.offRoll - 1) * off);
     sim.dragMul = 1 + (TR.offDrag - 1) * off;
@@ -1787,7 +1800,7 @@ function frame() {
   // Grime: builds up over a few minutes of driving (faster in a dust storm), washed
   // off by rain and by fording the river. Kept across reloads.
   {
-    const touching = W.filter((w) => w.sim.contact).length / W.length;
+    const touching = W.length ? W.filter((w) => w.sim.contact).length / W.length : 0;
     const v = Math.min(1, Math.abs(sim.speed) / 8);
     let d = dirt.v + dt * touching * v * (1 + 2 * (weather.kind === 'dust' ? weather.w : 0)) / 220;
     if (weather.kind === 'rain') d -= dt * weather.w / 45;
@@ -1807,6 +1820,8 @@ function frame() {
     const gy = groundHeight(sim.pos.x, sim.pos.z);
     let touching = 0;
     for (const w of sim.wheels) if (w.contact) touching++;
+    // A hovering glider's shadow fades and spreads as it climbs.
+    if (SPEC.flight) touching = sim.height() < 6 ? 1 : 0;
     contactShadow.on += ((touching ? 1 : 0.25) - contactShadow.on) * (1 - Math.exp(-6 * dt));
     contactShadow.g.position.set(sim.pos.x, gy + 0.06, sim.pos.z);
     contactShadow.g.rotation.y = yawNow;
@@ -1949,7 +1964,7 @@ function frame() {
   }
 
   if (audio) {
-    const contacts = W.filter((w) => w.sim.contact).length / W.length;
+    const contacts = W.length ? W.filter((w) => w.sim.contact).length / W.length : 0;
     audio.update({ speed: sim.speed, throttle: sim.cmd.throttle, contact: contacts,
       boost: sim.cmd.boost, daylight, storm: weather.w });
     // Knock when a wheel slams into its bump stop.
@@ -1960,7 +1975,9 @@ function frame() {
     }
   }
 
-  hudSpeed.textContent = `${(speedAbs * 3.6).toFixed(0)} км/год · ${SPEC.driveLabel[sim.awd ? 0 : 1]}`;
+  hudSpeed.textContent = SPEC.flight
+    ? `${(speedAbs * 3.6).toFixed(0)} км/год · ↕ ${Math.max(0, sim.height()).toFixed(0)} м`
+    : `${(speedAbs * 3.6).toFixed(0)} км/год · ${SPEC.driveLabel[sim.awd ? 0 : 1]}`;
   const compassTargets = route.map((p, i) => ({
     x: p.x, z: p.z, kind: 'circle', text: String(i + 1), color: i === 0 ? '#7ce68f' : '#4fe0ff',
   }));

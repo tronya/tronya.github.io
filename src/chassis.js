@@ -7,7 +7,7 @@ const KEY = 'rover.chassis';
 function read() {
   try { return localStorage.getItem(KEY); } catch (e) { return null; } // storage may be blocked
 }
-const IDS = ['truck', 'crawler', 'hauler', 'buggy', 'speedster'];
+const IDS = ['truck', 'crawler', 'hauler', 'buggy', 'speedster', 'galatea', 'glider'];
 export const CHASSIS = IDS.includes(read()) ? read() : 'truck';
 
 export function setChassis(id) {
@@ -282,10 +282,100 @@ const SPECS = {
       marker: { x: 1.34, y: -0.7, z: 0.6 }, // the lime pair on the sidepods
     },
   },
+  // ГАЛАТЕЯ: a six-wheeled research rover on walking-machine legs. A white oval hull
+  // rides high; the front wheels hang on their own jointed legs, the four rear ones
+  // on a rocker bogie each side, so every wheel goes up and down with a lot of travel.
+  galatea: {
+    id: 'galatea',
+    terrain: { pack: 2, perM: 0.008, idle: 1.3, solar: 1.9, offRoll: 0.85, offDrag: 0.9, wade: 1.6 },
+    blurb: 'дослідник на ногах: передні колеса на окремих ногах, задні четверо на балках-візках; м’яко ковтає камені, повертає як танк — бортами',
+    name: 'ГАЛАТЕЯ 6×6',
+    tag: 'дослідницький ровер · Галатея',
+    driveLabel: ['6×6', '6×6'],
+    wheelScale: 1.15,
+    wheelX: 3.45, // splayed far out on the legs
+    hullW: 3.2,
+    axleZ: [3.5, 0, -3.5],
+    // No wheel steers: it turns like a tank, the left and right sides driven apart
+    // (see physics.js), and spins on the spot with no throttle at all.
+    turnZ: 0,
+    skidSteer: true,
+    legs: true,
+    susp: { Lmin: 0.1, Lmax: 1.3, Lfree: 1.36, Lstatic: 0.72 },
+    steerTime: 0.5,
+    progLen: 0.5,
+    damp: { bump: 0.12, rebound: 0.24 },
+    mass: 5600,
+    box: { w: 3.4, h: 1.7, l: 8.8 },
+    comY: -0.5,
+    mu: 1.45,
+    vMax: 11,
+    vMaxBoost: 26,
+    awdSplit: false,
+    lockers: true,
+    lowGear: 1.5,
+    arb: [0.8, 0, 0.8],
+    climb: 0.85,
+    tyreFaceX: 4.07,
+    // The oval nose leads; the gunmetal module is the tail.
+    hullGrids: [
+      { xs: [-1.1, 0, 1.1], ys: [-0.02], zs: [3.8, 2.2, 0.7, -0.7, -2.2, -3.9] },
+      { xs: [-1.6, 0, 1.6], ys: [0.45, 0.95], zs: [3.9, 2.2, 0.6, -1.0, -2.6, -4.2] },
+      { xs: [-1.15, 0, 1.15], ys: [1.48], zs: [3.4, 1.5, -0.5, -2.4] },
+      { xs: [-1.3, 1.3], ys: [1.15], zs: [-4.4] },
+    ],
+    mounts: {
+      head: { x: 0.78, y: 0.62, z: 4.3, glowZ: 4.42, aimX: 0.55 },
+      far: { y: 1.5, z: 3.32 },
+      cab: { y: 1.25, z: -3.4 },
+      marker: { x: 1.62, y: 0.55, z: -1.2 },
+    },
+  },
+  // КОЛІБРІ: a hover glider. No wheels — physics.js flies it as a HoverSim, holding
+  // it at a chosen height (to 15 m) over the ground, water or a bridge. The wheel
+  // and suspension fields below only keep shared code happy; nothing reads them.
+  glider: {
+    id: 'glider',
+    flight: true,
+    // Hovering burns power just to stay up, so it drains even standing still.
+    terrain: { pack: 1.3, perM: 0.0062, idle: 7, solar: 0.9, offRoll: 1, offDrag: 1, wade: 99 },
+    blurb: 'летить над поверхнею до 15 м: Shift — вгору, Ctrl — вниз; не боїться ні каміння, ні води',
+    name: 'ГЛАЙДЕР',
+    tag: 'ховер-глайдер · Колібрі',
+    driveLabel: ['політ', 'політ'],
+    wheelScale: 1,
+    wheelX: 1.6,
+    hullW: 2.6,
+    axleZ: [],
+    turnZ: 0,
+    susp: { Lmin: 0.1, Lmax: 0.7, Lfree: 0.6, Lstatic: 0.5 },
+    steerTime: 0.5,
+    progLen: 0.15,
+    damp: { bump: 1, rebound: 1 },
+    mass: 2600,
+    box: { w: 3.4, h: 1.9, l: 6.4 },
+    comY: 0,
+    mu: 1,
+    vMax: 24,
+    vMaxBoost: 24,
+    awdSplit: false,
+    lockers: false,
+    lowGear: 1,
+    arb: [],
+    climb: 0.6,
+    tyreFaceX: 2,
+    hullGrids: [{ xs: [-1, 1], ys: [-0.6], zs: [-2.5, 2.5] }],
+    mounts: {
+      head: { x: 0.55, y: -0.15, z: 3.15, glowZ: 3.25, aimX: 0.45 },
+      far: { y: 1.25, z: 1.7 },
+      cab: { y: 0.6, z: 1.9 },
+      marker: { x: 1.75, y: -0.1, z: -0.6 },
+    },
+  },
 };
 
 export const SPEC = SPECS[CHASSIS];
-export const CHASSIS_LIST = [SPECS.truck, SPECS.crawler, SPECS.hauler, SPECS.buggy, SPECS.speedster];
+export const CHASSIS_LIST = [SPECS.truck, SPECS.crawler, SPECS.hauler, SPECS.buggy, SPECS.speedster, SPECS.galatea, SPECS.glider];
 
 // One entry per wheel, the single source of truth for both the art and the sim —
 // they are matched by index in main.js, so the order must come from one place.
@@ -335,6 +425,7 @@ const RS_OFF = 35 / 3.6;
 // two-wheel formula; for the crawler it falls out as all-wheel steering for free.
 export function steerAngle(w, delta, speed = 0) {
   if (Math.abs(delta) < 1e-4) return 0;
+  if (SPEC.skidSteer || (SPEC.frontSteerOnly && !w.front)) return 0;
   const t = Math.min(1, Math.max(0, (Math.abs(speed) - RS_FULL) / (RS_OFF - RS_FULL)));
   const turnZ = SPEC.turnZ + (REAR_Z - SPEC.turnZ) * t * t * (3 - 2 * t);
   const dz = w.z - turnZ;

@@ -76,6 +76,8 @@ const MOTOR = {
   truck: { base: 70, perMs: 18 },
   crawler: { base: 55, perMs: 16 },
   hauler: { base: 42, perMs: 13 },
+  galatea: { base: 50, perMs: 14 },
+  glider: { base: 120, perMs: 10 },
   buggy: { base: 75, perMs: 20 },
   speedster: { base: 95, perMs: 24 },
 }[CHASSIS] || { base: 70, perMs: 18 };

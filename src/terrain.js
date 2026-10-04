@@ -399,6 +399,156 @@ function craterHeight(x, z) {
   return h;
 }
 
+// ---------- big landforms: impact basins, collapse pits, scarps, a canyon ----------
+// Scattered off the road (it stays drivable: each one fades out before it reaches
+// the graded strip) and away from where the town goes. Plain data, placed once.
+//
+// Where «Обрій» may stand (see placeSettlement): kept clear of all of this.
+const TOWN_SPOTS = (() => {
+  const k = Math.floor(ROUTE_PTS.length * 0.42);
+  const a = ROUTE_PTS[k];
+  const b = ROUTE_PTS[Math.min(k + 4, ROUTE_PTS.length - 1)];
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const nx = -(b.z - a.z) / len;
+  const nz = (b.x - a.x) / len;
+  return [1, -1].map((s) => ({ x: a.x + nx * s * 340, z: a.z + nz * s * 340 }));
+})();
+const nearTownSpot = (x, z, r) => PLANET === 'mars' && TOWN_SPOTS.some((t) => Math.hypot(x - t.x, z - t.z) < 190 + r);
+
+// Somewhere off the road at a random point along it: `gap` metres of clear ground
+// between the road strip and the feature's edge, plus up to `spread` more.
+function offRoadSpot(i, seed, R, gap, spread) {
+  const n = ROUTE_PTS.length;
+  const k = 1 + Math.floor(hash(i * 3 + 1 + seed, 17) * (n - 3));
+  const a = ROUTE_PTS[k - 1];
+  const b = ROUTE_PTS[k + 1];
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const nx = -(b.z - a.z) / len;
+  const nz = (b.x - a.x) / len;
+  const off = (hash(i * 5 + 2 + seed, 23) < 0.5 ? -1 : 1) * (ROAD_HALF + gap + R + hash(i * 7 + 3 + seed, 31) * spread);
+  const x = ROUTE_PTS[k].x + nx * off;
+  const z = ROUTE_PTS[k].z + nz * off;
+  if (roadDist(x, z) < ROAD_HALF + gap + R * 0.9) return null;
+  if (BASES.some((bs) => Math.hypot(x - bs.x, z - bs.z) < BASE_FLAT_R + R + 120)) return null;
+  if (nearTownSpot(x, z, R)) return null;
+  return { x, z };
+}
+
+// Impact basins: a flat floor well below the plain, steep inner walls, a raised
+// rim, ejecta tapering away outside, and a central peak in the biggest.
+const BASINS = (() => {
+  const cfg = { mars: [26, 70, 210, 160, 1500], moon: [30, 60, 240, 90, 1500] }[PLANET];
+  if (!cfg) return [];
+  const [count, rMin, rMax, gap, spread] = cfg;
+  const out = [];
+  for (let i = 0; i < count * 3 && out.length < count; i++) {
+    const R = rMin + Math.pow(hash(i * 13 + 7, 3), 1.6) * (rMax - rMin);
+    const p = offRoadSpot(i, 5000, R * 1.6, gap, spread);
+    if (!p) continue;
+    if (out.some((c) => Math.hypot(c.x - p.x, c.z - p.z) < (c.R + R) * 1.3)) continue;
+    out.push({ x: p.x, z: p.z, R, D: R * (0.16 + 0.06 * hash(i, 99)), peak: R > 140 });
+  }
+  return out;
+})();
+
+// Collapse pits: ground fallen into a void underneath — round holes with sheer
+// walls, some alone, most in a row along a buried fault, like the pit chains of
+// Mars and the skylights of the Moon. They are deep: drive in and you stay in.
+export const TERRAIN_FEATURES = { get basins() { return BASINS; }, get pits() { return PITS; } };
+const PITS = (() => {
+  const cfg = { mars: [16, 12, 28, 40, 700], moon: [8, 12, 30, 30, 900] }[PLANET];
+  if (!cfg) return [];
+  const [chains, rMin, rMax, gap, spread] = cfg;
+  const out = [];
+  for (let c = 0; c < chains; c++) {
+    const n = 1 + Math.floor(hash(c, 61) * 4);
+    const R0 = rMin + hash(c, 62) * (rMax - rMin);
+    const p = offRoadSpot(c, 8000, R0 * n * 1.4, gap, spread);
+    if (!p) continue;
+    const ang = hash(c, 63) * Math.PI * 2;
+    for (let j = 0; j < n; j++) {
+      const R = R0 * (0.65 + 0.5 * hash(c * 7 + j, 64));
+      const along = (j - (n - 1) / 2) * R0 * 2.4;
+      const x = p.x + Math.cos(ang) * along;
+      const z = p.z + Math.sin(ang) * along;
+      if (roadDist(x, z) < ROAD_HALF + gap + R) continue;
+      if (BASINS.some((b) => Math.hypot(b.x - x, b.z - z) < b.R * 1.4 + R)) continue;
+      out.push({ x, z, R, D: R * (0.7 + 0.4 * hash(c * 7 + j, 65)) });
+    }
+  }
+  return out;
+})();
+
+const FEATURE_BIN = 600;
+const featureBins = new Map();
+for (const f of [...BASINS.map((b) => ({ ...b, kind: 0 })), ...PITS.map((p) => ({ ...p, kind: 1 }))]) {
+  const reach = f.kind === 0 ? f.R * 1.9 : f.R * 1.3;
+  for (let i = Math.floor((f.x - reach) / FEATURE_BIN); i <= Math.floor((f.x + reach) / FEATURE_BIN); i++) {
+    for (let j = Math.floor((f.z - reach) / FEATURE_BIN); j <= Math.floor((f.z + reach) / FEATURE_BIN); j++) {
+      const key = i * 65536 + j;
+      if (!featureBins.has(key)) featureBins.set(key, []);
+      featureBins.get(key).push(f);
+    }
+  }
+}
+
+function featureHeight(x, z) {
+  const bin = featureBins.get(Math.floor(x / FEATURE_BIN) * 65536 + Math.floor(z / FEATURE_BIN));
+  if (!bin) return 0;
+  let h = 0;
+  for (const f of bin) {
+    const dx = x - f.x;
+    const dz = z - f.z;
+    const d2 = dx * dx + dz * dz;
+    if (f.kind === 0) {
+      if (d2 > (f.R * 1.9) ** 2) continue;
+      // A ragged outline, not a compass circle.
+      const t = (Math.sqrt(d2) / f.R) * (1 + 0.08 * (vnoise(x * 0.012 + f.x * 0.001, z * 0.012) - 0.5));
+      const bowl = 1 - smooth(0.62, 0.97, t); // floor .. top of the inner wall
+      h -= f.D * bowl;
+      h += f.R * 0.045 * Math.exp(-(((t - 1) / 0.13) ** 2)); // the rim
+      if (t > 1) h += f.R * 0.03 * Math.exp(-(t - 1) * 3) * smooth(1.9, 1.3, t); // ejecta apron
+      if (f.peak) h += f.D * 0.55 * Math.exp(-((t / 0.17) ** 2));
+    } else {
+      if (d2 > (f.R * 1.3) ** 2) continue;
+      const t = (Math.sqrt(d2) / f.R) * (1 + 0.12 * (vnoise(x * 0.08, z * 0.08) - 0.5));
+      h -= f.D * (1 - smooth(0.72, 1.0, t)); // near-vertical walls
+      if (t > 0.95) h -= 0.8 * smooth(1.3, 1.0, t); // a slumped lip round the edge
+    }
+  }
+  return h;
+}
+
+// Fault scarps: whole tracts of ground dropped down along a line, leaving a wall of
+// rock tens of metres high. A slow field picks the sunken side; a very narrow step
+// across its threshold makes the wall, a little noise on the threshold frays it.
+// Fades out near the road, which ramps down the step where it crosses.
+function scarpHeight(wx, wz, rd) {
+  const away = smooth(110, 380, rd);
+  if (away <= 0) return 0;
+  const f = fbm(wx * 0.00075 + 700, wz * 0.00075 - 420, 3) + (fbm(wx * 0.012 + 3, wz * 0.012 + 8, 2) - 0.5) * 0.012;
+  const step = smooth(0.535, 0.545, f);
+  if (step <= 0) return 0;
+  const depth = 26 + 22 * fbm(wx * 0.002 + 9, wz * 0.002 - 4, 2);
+  // A second, lower step on part of it: terraces going down.
+  const step2 = smooth(0.585, 0.593, f) * smooth(0.45, 0.6, fbm(wx * 0.0011 + 33, wz * 0.0011 + 71, 2));
+  return -away * (step * depth + step2 * depth * 0.6);
+}
+
+// A canyon: the zero line of a slow field winds across the plain like a dry river;
+// within a band either side of it the ground falls away to a flat floor between
+// steep walls. Shallow where it nears the road, so the road crosses on a saddle.
+function canyonHeight(wx, wz, rd) {
+  const away = smooth(150, 520, rd);
+  if (away <= 0) return 0;
+  const c = Math.abs(fbm(wx * 0.00055 - 900, wz * 0.00055 + 260, 3) - 0.5);
+  const half = 0.011 + 0.004 * fbm(wx * 0.003, wz * 0.003 + 5, 2);
+  const inside = 1 - smooth(half * 0.62, half, c);
+  if (inside <= 0) return 0;
+  const depth = 38 + 20 * fbm(wx * 0.0015 + 61, wz * 0.0015 + 2, 2);
+  return -away * inside * depth;
+}
+
 // Flat-topped mesas standing over the plain, the shape Mars is photographed in.
 // A slow field says where one stands, and a very narrow smoothstep across its edge
 // turns what would be a hillside into a sheer wall and leaves the top dead level.
@@ -433,6 +583,7 @@ function moonHeight(x, z) {
   let h = (fbm(x * 0.006 + 5, z * 0.006 + 9, 3) - 0.46) * 5 * (0.3 + 2.0 * rough);
   h += (fbm(x * 0.03 + 60, z * 0.03 - 18, 2) - 0.46) * 1.6 * (0.3 + 2.4 * rough);
   h += craterHeight(x, z);
+  h += featureHeight(x, z);
 
   const wall = wallAmount(x, z);
   if (wall > 0) h += wall * (30 + 50 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
@@ -473,6 +624,7 @@ function verdantaHeight(x, z) {
   // The river carves its own shallow valley so it actually sits low instead of
   // just being painted onto flat ground (see verdantaColorAt for the water/moss).
   h -= riverAmount(x, z) * RIVER_DEPTH;
+  h += scarpHeight(wx, wz, rd) * 0.8 * flatTop * (1 - riverAmount(x, z));
 
   const wall = wallAmount(x, z);
   if (wall > 0) h += wall * (32 + 58 * fbm(x * 0.0075 + 400, z * 0.0075 + 120, 3));
@@ -509,6 +661,9 @@ function rawTerrainHeight(x, z) {
     h += duneZone * 1.15 * 0.5 * (Math.sin(ph) + 0.5 * Math.sin(2 * ph + 0.6)) * (0.4 + 1.2 * rough);
   }
   h += craterHeight(x, z);
+  h += featureHeight(x, z);
+  h += scarpHeight(wx, wz, rd) * flatTop;
+  h += canyonHeight(wx, wz, rd);
 
   // Real mountains, kept off the road: the road threads the valleys between them, so
   // cutting across means climbing. The foothills start ~70 m from the road.
@@ -547,10 +702,116 @@ var lmGrid = null;
 const LM_CELL = 160;
 const lmKey = (i, j) => i * 65536 + j;
 
+// ---------- bridges ----------
+// A span across the canyon, so you can cross it on the level instead of driving
+// down one wall and up the other. Each is placed from a point in the canyon: the
+// direction with the shortest way out to both rims wins, and the deck runs from rim
+// to rim a little way back from each edge. The deck is ground only for something at
+// its level (see deckRef): drive along the canyon floor and you pass underneath.
+export const BRIDGES = [];
+const BRIDGE_SEEDS = { mars: [[755, -2067]] }[PLANET] || [];
+const BRIDGE_W = 12; // deck width: two of the widest rover side by side, with room to spare
+let deckRef = -Infinity;
+// physics.js sets this to the rover's height each step.
+export function setDeckRef(y) { deckRef = y; }
+function planBridge(sx, sz) {
+  const floor = rawTerrainHeight(sx, sz);
+  let best = null;
+  for (let k = 0; k < 24; k++) {
+    const a = (k / 24) * Math.PI;
+    const dx = Math.sin(a);
+    const dz = Math.cos(a);
+    const out = [];
+    for (const sg of [1, -1]) {
+      let hit = null;
+      for (let d = 4; d < 220; d += 2) {
+        const h = rawTerrainHeight(sx + dx * d * sg, sz + dz * d * sg);
+        if (h > floor + 28) { hit = d; break; }
+      }
+      out.push(hit);
+    }
+    if (out[0] === null || out[1] === null) continue;
+    const span = out[0] + out[1];
+    if (!best || span < best.span) best = { span, dx, dz, d1: out[0], d2: out[1] };
+  }
+  if (!best) return;
+  // Run each end back from the lip until the ground has levelled off.
+  const end = (sg, d0) => {
+    let d = d0;
+    let prev = rawTerrainHeight(sx + best.dx * d * sg, sz + best.dz * d * sg);
+    for (let n = 0; n < 30; n++) {
+      d += 2;
+      const h = rawTerrainHeight(sx + best.dx * d * sg, sz + best.dz * d * sg);
+      if (Math.abs(h - prev) < 0.5) break;
+      prev = h;
+    }
+    d += 10;
+    const x = sx + best.dx * d * sg;
+    const z = sz + best.dz * d * sg;
+    return { x, z, y: rawTerrainHeight(x, z) };
+  };
+  const A = end(1, best.d1);
+  const B = end(-1, best.d2);
+  const len = Math.hypot(B.x - A.x, B.z - A.z);
+  BRIDGES.push({ ax: A.x, az: A.z, ay: A.y, bx: B.x, bz: B.z, by: B.y, len, w: BRIDGE_W,
+    ux: (B.x - A.x) / len, uz: (B.z - A.z) / len, floor });
+}
+// Top of the deck at (x, z), or -Infinity off every bridge.
+export function deckHeight(x, z) {
+  let top = -Infinity;
+  for (const b of BRIDGES) {
+    const dx = x - b.ax;
+    const dz = z - b.az;
+    const t = (dx * b.ux + dz * b.uz) / b.len;
+    if (t < 0 || t > 1) continue;
+    if (Math.abs(-dx * b.uz + dz * b.ux) > b.w / 2) continue;
+    // A gentle camber up over the middle, ramps easing on at each end.
+    // The plate's 35 cm thickness eases in over the first and last few metres, so
+    // the wheels roll on rather than hitting a step.
+    const ramp = Math.min(1, (t * b.len) / 5, ((1 - t) * b.len) / 5);
+    const y = b.ay + (b.by - b.ay) * t + Math.sin(Math.PI * t) * Math.min(3, b.len * 0.02) + 0.35 * ramp;
+    if (y > top) top = y;
+  }
+  return top;
+}
+function bridgeSites() {
+  for (const b of BRIDGES) {
+    const yaw = Math.atan2(b.ux, b.uz); // local +z along the deck
+    const lo = Math.min(b.ay, b.by);
+    const rails = Math.abs(b.by - b.ay) + Math.min(3, b.len * 0.02) + 1.8;
+    const mid = { x: (b.ax + b.bx) / 2, z: (b.az + b.bz) / 2 };
+    // Kerb walls along both sides of the deck, standing from the lower end up.
+    const deck = {
+      name: 'Міст', id: 'bridge', colliders: [-1, 1].map((sg) => ({ k: 'box', x: sg * (b.w / 2 + 0.25), z: 0, w: 0.5, d: b.len - 6, h: rails })),
+    };
+    const lm = { type: deck, x: mid.x, z: mid.z, y: lo - 0.5, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw), r: 0, R: b.len / 2 + 10, hidden: true };
+    pushSite(lm);
+    // The piers, standing on the canyon floor.
+    b.piers = [0.35, 0.65].map((t) => ({ x: b.ax + (b.bx - b.ax) * t, z: b.az + (b.bz - b.az) * t }));
+    for (const p of b.piers) {
+      const py = rawTerrainHeight(p.x, p.z);
+      pushSite({ type: { name: 'Опора', id: 'pier', colliders: [{ k: 'box', x: 0, z: 0, w: b.w * 0.8, d: 2.4, h: lo - py - 1.5 }] },
+        x: p.x, z: p.z, y: py, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw), r: 0, R: 10, hidden: true });
+    }
+  }
+}
+function pushSite(lm) {
+  lmList.push(lm);
+  for (let i = Math.floor((lm.x - lm.R) / LM_CELL); i <= Math.floor((lm.x + lm.R) / LM_CELL); i++) {
+    for (let j = Math.floor((lm.z - lm.R) / LM_CELL); j <= Math.floor((lm.z + lm.R) / LM_CELL); j++) {
+      const key = lmKey(i, j);
+      if (!lmGrid.has(key)) lmGrid.set(key, []);
+      lmGrid.get(key).push(lm);
+    }
+  }
+}
+
 function initLandmarks() {
   lmList = [];
   lmGrid = new Map();
   for (const b of BASES) addSolidSite(BASE_SOLIDS, b.x, b.z);
+  for (const [x, z] of BRIDGE_SEEDS) planBridge(x, z);
+  bridgeSites();
   if (PLANET === 'verdanta') addSolidSite(LAB_SOLIDS, LAB.x, LAB.z);
   if (PLANET === 'mars') placeSettlement();
   const types = LANDMARK_TYPES[PLANET] || [];
@@ -582,6 +843,7 @@ function initLandmarks() {
     // clear of both bases.
     if (roadDist(c.x, c.z) < 230) continue;
     if (BASES.some((b) => Math.hypot(c.x - b.x, c.z - b.z) < 360)) continue;
+    if (BRIDGES.some((b) => Math.hypot(c.x - (b.ax + b.bx) / 2, c.z - (b.az + b.bz) / 2) < b.len / 2 + 120)) continue;
     if (lmList.some((l) => !l.hidden && Math.hypot(c.x - l.x, c.z - l.z) < Math.max(SEP, l.R + 60))) continue;
     const type = pickType();
     // Fairly level ground, and no river underfoot.
@@ -952,6 +1214,10 @@ function cachedStone(ci, cj) {
 // Terrain plus any rock the wheel is standing on.
 export function groundHeight(x, z) {
   let h = terrainHeight(x, z);
+  if (BRIDGES.length) {
+    const d = deckHeight(x, z);
+    if (d > h && deckRef > d - 2.5) h = d;
+  }
   const ci = Math.floor(x / STONE_CELL);
   const cj = Math.floor(z / STONE_CELL);
   for (let di = -1; di <= 1; di++) {
@@ -973,6 +1239,14 @@ export function groundHeight(x, z) {
 // Anything laid on the ground (tyre tracks) has to follow this, not the analytic
 // height, or it sinks below the mesh between vertices.
 export function surfaceHeight(x, z) {
+  const g = surfaceHeight0(x, z);
+  if (BRIDGES.length) {
+    const d = deckHeight(x, z);
+    if (d > g && deckRef > d - 2.5) return d;
+  }
+  return g;
+}
+function surfaceHeight0(x, z) {
   const s = 220 / 48;
   const i = Math.floor(x / s);
   const j = Math.floor(z / s);

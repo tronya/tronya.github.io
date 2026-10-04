@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { surfaceHeight, waterDepthAt } from './terrain.js';
+import { surfaceHeight, waterDepthAt, deckHeight } from './terrain.js';
 import { PLANET } from './planet.js';
 
 // Clods and stones flung out from under the tyres. Every now and then — more often
@@ -65,6 +65,7 @@ export function createKickup() {
   function spawn(x, z, fx, fz, speed, R, burst) {
     if (live >= POOL) return;
     if (waterDepthAt(x, z) > 0.05) return;
+    if (deckHeight(x, z) > -Infinity) return; // nothing to dig out of a steel deck
     const p = P[live++];
     const big = R * (burst ? 1.1 : 1);
     // Mostly small stuff, now and then a proper lump.

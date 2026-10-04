@@ -52,8 +52,18 @@ M.orange = std(0xd8662a, 0.35, 0.45);
 M.lime = new THREE.MeshBasicMaterial({ color: lamp(0xb8f03a, 1.4) });
 M.glassDark = std(0x0c1218, 0.8, 0.06, { transparent: true, opacity: 0.78, depthWrite: false });
 M.teal = new THREE.MeshBasicMaterial({ color: lamp(0x3ad6b0, 1.6) });
+// ГАЛАТЕЯ: off-white shell, gunmetal modules, and warm glowing hex-grid panels.
+M.gWhite = std(0xdcdfe1, 0.2, 0.45);
+M.gGrey = std(0x4c5057, 0.55, 0.38);
+M.gSteel = std(0x8d939b, 0.85, 0.3);
+M.gPanel = std(0xffa448, 0.1, 0.32, { emissive: 0xff7414, emissiveIntensity: 0.55 });
+// КОЛІБРІ: safety-yellow paint over gunmetal, a hot glow in the lift jets.
+M.kYellow = std(0xe3a01e, 0.25, 0.5);
+M.kDark = std(0x2b2e33, 0.5, 0.42);
+M.kJet = new THREE.MeshBasicMaterial({ color: lamp(0x6fd8ff, 2.2) });
 if (CHASSIS === 'hauler') M.rim.color.set(0xc9831c);
 if (CHASSIS === 'buggy' || CHASSIS === 'speedster') M.rim.color.set(0x17181c);
+if (CHASSIS === 'galatea') M.rim.color.set(0xcfd3d6);
 function solarTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -84,7 +94,7 @@ M.panelBack = std(0x2a2d34, 0.5, 0.5);
 // ---------- paint, glass and dirt ----------
 // The painted panels get a clear coat, so the sky and the sun slide across them as
 // the rover turns; the glass and bare metal reflect more of the sky too.
-for (const k of ['hull', 'hullLit', 'trim', 'hazard', 'copper', 'graphite', 'orange', 'armorLit']) {
+for (const k of ['hull', 'hullLit', 'trim', 'hazard', 'copper', 'graphite', 'orange', 'armorLit', 'gWhite', 'kYellow']) {
   const o = M[k];
   M[k] = new THREE.MeshPhysicalMaterial({
     color: o.color, metalness: o.metalness, roughness: Math.max(0.3, o.roughness - 0.1),
@@ -156,7 +166,7 @@ for (const [k, m] of Object.entries(M)) {
 }
 
 // Lamps and glazing never cast: they are unlit strips or transparent.
-const NO_CAST = new Set([M.amber, M.amberDim, M.headlight, M.tail, M.screen, M.glass, M.glassDark, M.lime, M.teal]);
+const NO_CAST = new Set([M.amber, M.amberDim, M.headlight, M.tail, M.screen, M.glass, M.glassDark, M.lime, M.teal, M.kJet]);
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -489,6 +499,589 @@ function buildCorner(shellAll, rootAll, s, z, wx = WHEEL_X, my = 0) {
     place(damper, bot, pA.lerpVectors(bot, top, 0.5), 0.055);
     place(piston, top, pA.lerpVectors(top, bot, 0.55), 0.032);
   };
+}
+
+// A box stretched between two points (like place() does for round tubes), so
+// structural arms can be square-section.
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+function placeBox(m, a, b, w, d) {
+  _d.subVectors(b, a);
+  const len = _d.length();
+  m.position.addVectors(a, b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(UP, _d.divideScalar(len || 1));
+  m.scale.set(w, len, d);
+}
+// A round joint housing whose axle runs along z: dark drum, white cap, bolt ring.
+function jointDrum(g, x, y, z, r, len, s) {
+  g.add(cyl(r, r, len, M.gGrey, x, y, z, 'z'));
+  for (const e of [-1, 1]) {
+    g.add(cyl(r * 0.78, r * 0.78, 0.04, M.gWhite, x, y, z + e * (len / 2 + 0.02), 'z'));
+    g.add(cyl(r * 0.3, r * 0.3, 0.06, M.gGrey, x, y, z + e * (len / 2 + 0.05), 'z'));
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      g.add(cyl(0.025, 0.025, 0.03, M.gSteel, x + Math.cos(a) * r * 0.55, y + Math.sin(a) * r * 0.55, z + e * (len / 2 + 0.05), 'z', 6));
+    }
+  }
+  g.add(box(0.06, 0.05, 0.05, M.amber, x + s * r * 0.2, y + r * 0.95, z));
+}
+
+// Rigid two-bar linkage: given the two ends and the bar lengths, where the joint
+// between them sits — bent toward `bend` (a world direction), straight if the ends
+// are as far apart as the bars reach. Keeps metal parts from stretching.
+const _u = V(0, 0, 0);
+const _n = V(0, 0, 0);
+function elbow(out, A, B, la, lb, bend) {
+  _u.subVectors(B, A);
+  let d = _u.length();
+  _u.divideScalar(d || 1);
+  d = Math.min(Math.max(d, Math.abs(la - lb) + 1e-3), la + lb - 1e-3);
+  const along = (la * la - lb * lb + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, la * la - along * along));
+  _n.copy(bend).addScaledVector(_u, -bend.dot(_u)).normalize();
+  return out.copy(A).addScaledVector(_u, along).addScaledVector(_n, h);
+}
+// A hydraulic ram between two points: a barrel of fixed length from the base and a
+// rod of fixed length from the tip, so it telescopes instead of stretching.
+function ramParts(root) {
+  const barrel = new THREE.Mesh(UNIT, M.black);
+  const rodM = new THREE.Mesh(UNIT, M.gSteel);
+  root.add(barrel, rodM);
+  const t = V(0, 0, 0);
+  let lb = 0;
+  let lr = 0;
+  return (base, tip) => {
+    const d = base.distanceTo(tip);
+    if (!lb) { lb = d * 0.62; lr = d * 0.62; }
+    place(barrel, base, t.copy(base).lerp(tip, Math.min(1, lb / d)), 0.08);
+    place(rodM, tip, t.copy(tip).lerp(base, Math.min(1, lr / d)), 0.042);
+  };
+}
+function hubMotor(root, s) {
+  const hub = new THREE.Group();
+  hub.add(cyl(0.36, 0.36, 0.5, M.gGrey, 0, 0, 0, 'x'));
+  hub.add(cyl(0.28, 0.28, 0.08, M.gWhite, -s * 0.28, 0, 0, 'x'));
+  for (let k = 0; k < 4; k++) hub.add(box(0.06, 0.1, 0.5, M.gSteel, 0, Math.cos((k * Math.PI) / 2) * 0.36, Math.sin((k * Math.PI) / 2) * 0.36));
+  root.add(hub);
+  return hub;
+}
+const LEG_UP = V(0, 1, 0);
+
+// ГАЛАТЕЯ's front leg: a shoulder joint on the hull, an upper arm out to a knee, a
+// lower arm down to the hub motor. Both arms keep their length: as the wheel rises
+// and falls the knee folds and opens, and a ram from the hull follows the lower arm.
+function buildLeg(shellAll, rootAll, s, z, wx, my) {
+  const shell = new THREE.Group();
+  const root = new THREE.Group();
+  shell.position.y = my;
+  root.position.y = my;
+  shellAll.add(shell);
+  rootAll.add(root);
+  const zs = z * 0.8; // the leg sweeps forward from a shoulder set back on the hull
+  const S = V(s * 1.72, 0.5, zs);
+  shell.add(box(0.3, 0.7, 0.9, M.gGrey, s * 1.5, 0.5, zs));
+  jointDrum(shell, S.x, S.y, S.z, 0.4, 0.62, s);
+  const ramTop = V(s * 1.5, 1.08, zs - Math.sign(z || 1) * 0.55);
+  shell.add(box(0.22, 0.22, 0.22, M.gGrey, ramTop.x, ramTop.y, ramTop.z));
+
+  const upper = new THREE.Mesh(UNIT_BOX, M.gWhite);
+  const upperRib = new THREE.Mesh(UNIT_BOX, M.gGrey);
+  const lower = new THREE.Mesh(UNIT_BOX, M.gWhite);
+  const lowerRib = new THREE.Mesh(UNIT_BOX, M.gGrey);
+  const knee = new THREE.Group();
+  jointDrum(knee, 0, 0, 0, 0.3, 0.56, s);
+  knee.add(box(0.05, 0.12, 0.3, M.hazard, s * 0.28, 0, 0));
+  const hub = hubMotor(root, s);
+  const lamp = box(0.12, 0.06, 0.14, M.amber, 0, 0, 0);
+  root.add(upper, upperRib, lower, lowerRib, knee, lamp);
+  const ram = ramParts(root);
+
+  const halfW = TYRE_HALF_W * 1.05;
+  const E = V(0, 0, 0);
+  const K = V(0, 0, 0);
+  const a = V(0, 0, 0);
+  const b = V(0, 0, 0);
+  const mid = V(0, 0, 0);
+  // Bar lengths from the leg at its resting sag, knee raised over the line.
+  const E0 = V(s * (wx - halfW - 0.3), -SUSP.Lstatic, z);
+  const K0 = V(s * (1.72 + (Math.abs(E0.x) - 1.72) * 0.5), Math.max(S.y, E0.y) + 0.7, zs + (z - zs) * 0.5);
+  const la = S.distanceTo(K0);
+  const lb = K0.distanceTo(E0);
+  return (L) => {
+    E.set(s * (wx - halfW - 0.3), -L, z);
+    hub.position.set(s * (wx - halfW - 0.05), -L, z);
+    elbow(K, S, E, la, lb, LEG_UP);
+    knee.position.copy(K);
+    placeBox(upper, S, K, 0.4, 0.34);
+    placeBox(upperRib, a.copy(S).setY(S.y + 0.19), b.copy(K).setY(K.y + 0.19), 0.2, 0.36);
+    placeBox(lower, K, E, 0.36, 0.32);
+    placeBox(lowerRib, a.copy(K).setY(K.y + 0.17), b.copy(E).setY(E.y + 0.17), 0.18, 0.34);
+    lamp.position.lerpVectors(K, E, 0.5).y += 0.2;
+    ram(ramTop, mid.lerpVectors(K, E, 0.55));
+  };
+}
+
+// ГАЛАТЕЯ's middle and rear wheels on each side share one rocker beam, like a
+// planetary rover's bogie: two rigid arms meeting at a pivot, the pivot carried by
+// a telescopic pylon from a shoulder joint on the hull. The sim springs each wheel
+// on its own; the beam just follows both hubs (the middle wheel's corner records its
+// hub, the rear one, called right after, draws the whole bogie).
+const BOGIES = {};
+function buildBogie(shellAll, rootAll, s, z, wx, my, axle) {
+  const side = BOGIES[s] || (BOGIES[s] = { first: V(0, 0, 0), z: [] });
+  side.z[axle] = z;
+  const shell = new THREE.Group();
+  const root = new THREE.Group();
+  shell.position.y = my;
+  root.position.y = my;
+  shellAll.add(shell);
+  rootAll.add(root);
+  const halfW = TYRE_HALF_W * 1.05;
+  const hub = hubMotor(root, s);
+  const E = V(0, 0, 0);
+  const firstAxle = Math.min(...Object.keys(side.z).map(Number));
+
+  if (axle === firstAxle) {
+    return (L) => {
+      E.set(s * (wx - halfW - 0.3), -L, z);
+      hub.position.set(s * (wx - halfW - 0.05), -L, z);
+      side.first.copy(E);
+    };
+  }
+
+  const zc = (side.z[firstAxle] + z) / 2;
+  const S = V(s * 1.72, 0.5, zc);
+  shell.add(box(0.3, 0.75, 1.0, M.gGrey, s * 1.5, 0.5, zc));
+  jointDrum(shell, S.x, S.y, S.z, 0.44, 0.66, s);
+  const ramTop = V(s * 1.5, 1.1, zc + 0.75 * Math.sign(z - side.z[firstAxle]));
+  shell.add(box(0.22, 0.22, 0.22, M.gGrey, ramTop.x, ramTop.y, ramTop.z));
+  const sleeve = new THREE.Mesh(UNIT_BOX, M.gWhite);
+  const sleeveRib = new THREE.Mesh(UNIT_BOX, M.gGrey);
+  const slide = new THREE.Mesh(UNIT_BOX, M.gSteel);
+  const armA = new THREE.Mesh(UNIT_BOX, M.gWhite);
+  const armB = new THREE.Mesh(UNIT_BOX, M.gWhite);
+  const ribA = new THREE.Mesh(UNIT_BOX, M.gGrey);
+  const ribB = new THREE.Mesh(UNIT_BOX, M.gGrey);
+  const pivot = new THREE.Group();
+  jointDrum(pivot, 0, 0, 0, 0.36, 0.6, s);
+  pivot.rotation.y = Math.PI / 2;
+  const lamps = [box(0.12, 0.06, 0.14, M.amber, 0, 0, 0), box(0.12, 0.06, 0.14, M.amber, 0, 0, 0)];
+  const chev = [0, 1].map(() => box(0.04, 0.12, 0.22, M.hazard, 0, 0, 0));
+  root.add(sleeve, sleeveRib, slide, armA, armB, ribA, ribB, pivot, ...lamps, ...chev);
+  const ram = ramParts(root);
+
+  const C = V(0, 0, 0);
+  const a = V(0, 0, 0);
+  const b = V(0, 0, 0);
+  const mid = V(0, 0, 0);
+  const u = V(0, 0, 0);
+  const up = (p, dy) => a.copy(p).setY(p.y + dy);
+  // Arm lengths from the beam at rest: pivot 0.75 m over the middle of the hubs.
+  const A0 = V(s * (wx - halfW - 0.3), -SUSP.Lstatic, side.z[firstAxle]);
+  const B0 = V(s * (wx - halfW - 0.3), -SUSP.Lstatic, z);
+  const C0 = V(0, 0, 0).lerpVectors(A0, B0, 0.5);
+  C0.y += 0.75;
+  C0.x = s * (Math.abs(C0.x) - 0.1);
+  const la = A0.distanceTo(C0) + 0.12; // a little slack so the pair never locks straight
+  const lb = B0.distanceTo(C0) + 0.12;
+  const pyl = S.distanceTo(C0);
+  return (L) => {
+    E.set(s * (wx - halfW - 0.3), -L, z);
+    hub.position.set(s * (wx - halfW - 0.05), -L, z);
+    elbow(C, side.first, E, la, lb, LEG_UP);
+    pivot.position.copy(C);
+    placeBox(armA, side.first, C, 0.38, 0.34);
+    placeBox(armB, C, E, 0.38, 0.34);
+    placeBox(ribA, up(side.first, 0.18), b.copy(C).setY(C.y + 0.18), 0.18, 0.36);
+    placeBox(ribB, up(C, 0.18), b.copy(E).setY(E.y + 0.18), 0.18, 0.36);
+    // Telescopic pylon: a fixed-length sleeve from the shoulder, a steel slide from
+    // the pivot back up into it.
+    u.subVectors(C, S).normalize();
+    placeBox(sleeve, S, b.copy(S).addScaledVector(u, pyl * 0.62), 0.46, 0.42);
+    placeBox(sleeveRib, up(S, 0.22), b.copy(S).addScaledVector(u, pyl * 0.62).setY(b.y + 0.22), 0.22, 0.44);
+    placeBox(slide, C, b.copy(C).addScaledVector(u, -pyl * 0.55), 0.3, 0.28);
+    lamps[0].position.lerpVectors(side.first, C, 0.5).y += 0.22;
+    lamps[1].position.lerpVectors(C, E, 0.5).y += 0.22;
+    chev[0].position.copy(S).addScaledVector(u, pyl * 0.3).x += s * 0.24;
+    chev[1].position.copy(S).addScaledVector(u, pyl * 0.45).x += s * 0.24;
+    ram(ramTop, mid.copy(S).addScaledVector(u, pyl * 0.5));
+  };
+}
+
+// Jet flame: an open cone pointing down its own -y, drawn additively with a hot
+// white-yellow core fading through orange to nothing at the tip, flickering with a
+// little travelling noise. `power` (0..1+) sets brightness; the mesh is scaled by
+// the caller for length.
+const flameMat = new THREE.ShaderMaterial({
+  uniforms: { time: { value: 0 }, power: { value: 0.6 } },
+  vertexShader: /* glsl */ `
+    varying float vT;
+    varying vec3 vN;
+    varying vec3 vV;
+    varying vec3 vP;
+    void main() {
+      vT = 1.0 - uv.y; // 0 at the nozzle, 1 at the tip
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vN = normalize(normalMatrix * normal);
+      vV = normalize(-mv.xyz);
+      vP = position;
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform float time;
+    uniform float power;
+    varying float vT;
+    varying vec3 vN;
+    varying vec3 vV;
+    varying vec3 vP;
+    float h(float n) { return fract(sin(n) * 43758.5453); }
+    float noise(vec2 p) {
+      vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      float a = h(i.x + i.y * 57.0), b = h(i.x + 1.0 + i.y * 57.0), c = h(i.x + (i.y + 1.0) * 57.0), d = h(i.x + 1.0 + (i.y + 1.0) * 57.0);
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+    void main() {
+      float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.5);
+      float ang = atan(vP.x, vP.z);
+      float n = noise(vec2(ang * 3.0, vT * 6.0 - time * 14.0)) * 0.6 + noise(vec2(ang * 7.0 + 3.0, vT * 13.0 - time * 23.0)) * 0.4;
+      float body = (1.0 - smoothstep(0.05, 1.0, vT + (n - 0.5) * 0.3)) * smoothstep(0.0, 0.05, vT + 0.05);
+      vec3 core = vec3(1.0, 0.95, 0.75);
+      vec3 mid = vec3(1.0, 0.55, 0.12);
+      vec3 tail = vec3(0.9, 0.18, 0.04);
+      vec3 col = mix(core, mid, smoothstep(0.0, 0.18, vT));
+      col = mix(col, tail, smoothstep(0.3, 0.8, vT));
+      float a = body * edge * power * (0.75 + 0.5 * n);
+      gl_FragColor = vec4(col * a * 1.9, 1.0);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide,
+});
+NO_CAST.add(flameMat); // light, not matter: no shadow
+const FLAME_GEO = (() => {
+  const g = new THREE.CylinderGeometry(1, 0.04, 1, 20, 6, true); // nozzle-wide top, a point at the tip
+  g.translate(0, -0.5, 0); // top at the nozzle (y = 0), tip down at -1
+  return g;
+})();
+// A flame on a nozzle at `at`, pointing along `dir` (a unit vector in the body).
+function flame(root, at, dir, radius) {
+  const m = new THREE.Mesh(FLAME_GEO, flameMat);
+  m.position.copy(at);
+  m.quaternion.setFromUnitVectors(V(0, -1, 0), dir);
+  m.renderOrder = 6;
+  m.frustumCulled = false;
+  m.userData.r = radius;
+  root.add(m);
+  return m;
+}
+
+// КОЛІБРІ, the hover glider: a boxy safety-yellow hull with a glass cockpit up
+// front, a ducted turbine slung on each side (its fan really turns), a tail wing and
+// fin, lift jets glowing underneath, and the clutter of a working machine — ladder,
+// hatch, hull number, hazard stripes, rivets, vents, exhaust stacks, aerials.
+function gliderBody(shell, root) {
+  shell.add(loft([
+    { z: -2.75, w: 1.9, yb: -0.45, yt: 0.7, rt: 0.2, rb: 0.2 },
+    { z: -2.45, w: 2.3, yb: -0.62, yt: 1.05, rt: 0.25, rb: 0.22 },
+    { z: 0.6, w: 2.45, yb: -0.72, yt: 1.18, rt: 0.28, rb: 0.24 },
+    { z: 1.5, w: 2.4, yb: -0.72, yt: 1.0, rt: 0.28, rb: 0.24 },
+    { z: 2.6, w: 2.1, yb: -0.62, yt: 0.32, rt: 0.3, rb: 0.24 },
+    { z: 3.2, w: 1.6, yb: -0.48, yt: 0.0, rt: 0.28, rb: 0.2 },
+  ], M.kYellow));
+  // Gunmetal belly and chin, and the cockpit glass over the nose.
+  shell.add(loft([
+    { z: -2.5, w: 2.2, yb: -0.78, yt: -0.45, rt: 0.12, rb: 0.15 },
+    { z: 2.7, w: 2.0, yb: -0.78, yt: -0.45, rt: 0.12, rb: 0.15 },
+    { z: 3.3, w: 1.5, yb: -0.6, yt: -0.35, rt: 0.1, rb: 0.12 },
+  ], M.kDark));
+  shell.add(loft([
+    { z: 1.35, w: 1.9, yb: 0.3, yt: 1.12, rt: 0.45, rb: 0.1 },
+    { z: 2.3, w: 1.85, yb: 0.12, yt: 0.82, rt: 0.42, rb: 0.1 },
+    { z: 2.95, w: 1.5, yb: -0.05, yt: 0.35, rt: 0.3, rb: 0.08 },
+  ], M.glassDark));
+  shell.add(box(1.95, 0.08, 0.1, M.kDark, 0, 1.12, 1.32)); // canopy frame
+  for (const sd of [-1, 1]) shell.add(tube([sd * 0.93, 1.1, 1.35], [sd * 0.75, 0.4, 2.9], 0.03, M.kDark));
+  // Seat and the stick inside the glass.
+  shell.add(box(0.6, 0.12, 0.6, M.black, 0, 0.05, 1.6));
+  shell.add(box(0.6, 0.7, 0.12, M.black, 0, 0.4, 1.3));
+
+  // Side turbines: a yellow nacelle with dark bands, an intake grille at the front
+  // with the fan behind it, an exhaust nozzle at the back.
+  const fans = [];
+  for (const sd of [-1, 1]) {
+    const x = sd * 1.78;
+    shell.add(cyl(0.6, 0.6, 2.4, M.kYellow, x, -0.12, -0.3, 'z', 24));
+    for (const z of [-1.2, 0.2, 0.7]) shell.add(cyl(0.62, 0.62, 0.12, M.kDark, x, -0.12, z, 'z', 24));
+    shell.add(cyl(0.64, 0.6, 0.18, M.kDark, x, -0.12, 0.98, 'z', 24)); // intake lip
+    for (let k = -4; k <= 4; k++) shell.add(box(0.02, Math.sqrt(Math.max(0, 0.53 ** 2 - (k * 0.12) ** 2)) * 2, 0.03, M.gSteel, x + k * 0.12, -0.12, 1.08));
+    shell.add(cyl(0.45, 0.32, 0.5, M.kDark, x, -0.12, -1.7, 'z', 20)); // nozzle
+    shell.add(cyl(0.3, 0.3, 0.04, M.kJet, x, -0.12, -1.96, 'z', 20));
+    shell.add(box(0.5, 0.25, 0.9, M.kDark, sd * 1.2, -0.1, -0.3)); // pylon to the hull
+    for (let k = 0; k < 5; k++) shell.add(box(0.05, 0.12, 0.25, k % 2 ? M.black : M.hazard, x + sd * 0.58, 0.05, -0.9 + k * 0.25));
+    const fan = new THREE.Group();
+    fan.position.set(x, -0.12, 0.9);
+    fan.add(cyl(0.16, 0.16, 0.2, M.kDark, 0, 0, 0, 'z', 12));
+    for (let k = 0; k < 9; k++) {
+      const blade = box(0.09, 0.5, 0.03, M.gSteel, 0, 0.27, 0);
+      const arm = new THREE.Group();
+      arm.rotation.z = (k / 9) * Math.PI * 2;
+      blade.rotation.y = 0.5;
+      arm.add(blade);
+      fan.add(arm);
+    }
+    root.add(fan);
+    fans.push(fan);
+  }
+  // The fans turn: spun from the clock each time they are drawn.
+  fans[0].children[0].onBeforeRender = () => {
+    const a = performance.now() * 0.02;
+    fans[0].rotation.z = a;
+    fans[1].rotation.z = -a;
+  };
+
+  // Lift jets under the belly, each with its flame; and the turbines' exhaust.
+  const lift = [];
+  for (const [x, z] of [[-0.6, -1.7], [0.6, -1.7], [-0.6, 1.6], [0.6, 1.6]]) {
+    shell.add(cyl(0.3, 0.34, 0.12, M.kDark, x, -0.8, z));
+    shell.add(cyl(0.22, 0.22, 0.02, M.kJet, x, -0.87, z));
+    lift.push(flame(root, V(x, -0.88, z), V(0, -1, 0), 0.17));
+  }
+  const push = [-1, 1].map((sd) => flame(root, V(sd * 1.78, -0.12, -1.97), V(0, 0, -1), 0.27));
+  // Tail: a swept fin and a stub wing with hazard-striped tips.
+  const fin = box(0.12, 1.0, 1.0, M.kYellow, 0, 1.55, -2.3);
+  fin.rotation.x = -0.45;
+  shell.add(fin);
+  shell.add(box(3.4, 0.08, 0.75, M.kYellow, 0, 1.12, -2.45));
+  for (const sd of [-1, 1]) {
+    for (let k = 0; k < 4; k++) shell.add(box(0.12, 0.09, 0.76, k % 2 ? M.black : M.hazard, sd * (1.35 + k * 0.1), 1.12, -2.45));
+    shell.add(box(0.06, 0.05, 0.05, sd > 0 ? M.amber : M.tail, sd * 1.7, 1.14, -2.1));
+  }
+  // Exhaust stacks along the back of the roof, curling aft.
+  for (let k = 0; k < 4; k++) {
+    for (const sd of [-1, 1]) {
+      const x = sd * (0.35 + k * 0.17);
+      shell.add(tube([x, 1.15, -1.0 - k * 0.22], [x, 1.42, -1.15 - k * 0.22], 0.045, M.gSteel));
+      shell.add(tube([x, 1.42, -1.15 - k * 0.22], [x, 1.47, -1.4 - k * 0.22], 0.045, M.gSteel));
+    }
+  }
+  // Left side: a ladder, a hatch outline with a handle and a window, the hull number
+  // ring, a vent, warning plates. Right side gets a vent and plates too.
+  for (const sd of [-1, 1]) {
+    const x = sd * 1.235;
+    if (sd > 0) {
+      for (const dz of [-1.75, -1.4]) shell.add(box(0.04, 1.6, 0.04, M.gSteel, x + 0.12, 0.25, dz));
+      for (let k = 0; k < 6; k++) shell.add(box(0.04, 0.035, 0.35, M.gSteel, x + 0.12, -0.42 + k * 0.27, -1.575));
+      for (const [y, h] of [[0.98, 0.03], [-0.28, 0.03]]) shell.add(box(0.03, h, 1.0, M.kDark, x, y, 0.2));
+      for (const z of [-0.3, 0.7]) shell.add(box(0.03, 1.29, 0.03, M.kDark, x, 0.35, z));
+      shell.add(box(0.04, 0.05, 0.2, M.gSteel, x + 0.02, 0.35, 0.6));
+      shell.add(box(0.035, 0.32, 0.36, M.glassDark, x, 0.65, 0.95));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.045, 8, 24), M.black);
+      ring.rotation.y = Math.PI / 2;
+      ring.position.set(x + 0.02, 0.45, 0.2);
+      shell.add(ring);
+      shell.add(box(0.03, 0.26, 0.05, M.black, x + 0.02, 0.45, 0.1)); // «0»
+      shell.add(box(0.03, 0.26, 0.05, M.black, x + 0.02, 0.45, 0.3)); // «5»
+    }
+    for (let k = 0; k < 6; k++) shell.add(box(0.03, 0.035, 0.5, M.black, x, 0.62 + k * 0.07, sd > 0 ? 1.55 : 0.4));
+    shell.add(box(0.03, 0.14, 0.24, M.gWhite, x, 0.0, sd > 0 ? 1.2 : -0.6));
+    shell.add(box(0.035, 0.05, 0.05, M.hazard, x, -0.2, sd > 0 ? 1.2 : -0.6));
+    // Rivets along the top edge and the belly seam.
+    for (let k = 0; k < 14; k++) {
+      shell.add(cyl(0.022, 0.022, 0.02, M.gSteel, x + sd * 0.01, 1.02, -2.2 + k * 0.3, 'x', 6));
+      shell.add(cyl(0.022, 0.022, 0.02, M.gSteel, x + sd * 0.01, -0.52, -2.2 + k * 0.3, 'x', 6));
+    }
+    shell.add(box(0.05, 0.05, 0.4, M.amber, sd * 1.24, -0.1, 2.3));
+  }
+  // Roof: a hatch, a sensor pod, two aerials, a beacon.
+  shell.add(box(0.7, 0.05, 0.6, M.kDark, 0, 1.2, -0.2));
+  shell.add(box(0.5, 0.06, 0.06, M.gSteel, 0, 1.24, -0.4));
+  shell.add(cyl(0.16, 0.18, 0.2, M.kDark, -0.55, 1.28, 0.7));
+  shell.add(mesh(new THREE.SphereGeometry(0.14, 12, 8), M.glassDark, -0.55, 1.4, 0.7));
+  shell.add(tube([0.6, 1.18, 0.4], [0.75, 2.1, 0.2], 0.012, M.metalDark));
+  shell.add(tube([-0.2, 1.18, -2.0], [-0.25, 2.3, -2.2], 0.012, M.metalDark));
+  shell.add(cyl(0.07, 0.07, 0.08, M.amber, 0.2, 1.24, 0.9));
+  // Nose: twin headlamps under the glass, amber marker strip, a tow eye.
+  for (const sd of [-1, 1]) {
+    shell.add(cyl(0.13, 0.12, 0.16, M.black, sd * 0.55, -0.15, 3.12, 'z'));
+    shell.add(cyl(0.1, 0.1, 0.03, M.headlight, sd * 0.55, -0.15, 3.2, 'z'));
+  }
+  shell.add(box(0.9, 0.04, 0.03, M.amber, 0, -0.32, 3.22));
+  shell.add(new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.025, 6, 12), M.gSteel).translateZ(3.32).translateY(-0.5));
+  // Tail lamps on the back face.
+  for (const sd of [-1, 1]) shell.add(box(0.3, 0.1, 0.04, M.tail, sd * 0.6, 0.55, -2.77));
+
+  const setPanels = buildPanels(root, { x: 0.85, y: 1.22, z: -0.9 });
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0, 0.55, 1.95);
+  yokePivot.rotation.x = -0.5;
+  yokePivot.add(new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 8, 20), M.black));
+  root.add(yokePivot);
+  // lift 0..1+ (hover effort, more when climbing), thrust 0..1 (throttle).
+  function setThrust(liftK, thrustK) {
+    const t = performance.now() / 1000;
+    flameMat.uniforms.time.value = t;
+    flameMat.uniforms.power.value = 1;
+    lift.forEach((m, i) => {
+      const fl = 1 + 0.12 * Math.sin(t * 31 + i * 1.7) + 0.08 * Math.sin(t * 57 + i);
+      const len = (2.2 + 2.8 * liftK) * fl;
+      m.scale.set(m.userData.r, len, m.userData.r);
+      m.visible = liftK > 0.02;
+    });
+    push.forEach((m, i) => {
+      const fl = 1 + 0.1 * Math.sin(t * 27 + i * 2.3);
+      const len = (0.3 + 3.2 * thrustK) * fl;
+      m.scale.set(m.userData.r, len, m.userData.r);
+      m.visible = thrustK > 0.03;
+    });
+  }
+
+  return { yokePivot, setPanels, setThrust, tailLamps: [V(0.6, 0.55, -2.8), V(-0.6, 0.55, -2.8)] };
+}
+
+// ГАЛАТЕЯ: an off-white oval hull with a gunmetal command module up front, glowing
+// hex-grid panels, and the small kit that makes a machine read as real — seams,
+// hatches, a sensor dome, vents, cables, status lights.
+function galateaBody(shellOuter, root) {
+  // Authored with the module at +z, then turned round: the oval nose leads and the
+  // gunmetal module (with its bogie wheels under it) is the tail.
+  const shell = new THREE.Group();
+  shell.rotation.y = Math.PI;
+  shellOuter.add(shell);
+  shell.add(loft([
+    { z: -4.25, w: 2.0, yb: 0.3, yt: 1.0, rt: 0.45, rb: 0.3 },
+    { z: -4.0, w: 2.8, yb: 0.08, yt: 1.3, rt: 0.55, rb: 0.35 },
+    { z: -3.4, w: 3.15, yb: 0.0, yt: 1.45, rt: 0.6, rb: 0.35 },
+    { z: -1.0, w: 3.25, yb: 0.0, yt: 1.5, rt: 0.62, rb: 0.35 },
+    { z: 1.6, w: 3.25, yb: 0.0, yt: 1.5, rt: 0.62, rb: 0.35 },
+    { z: 2.5, w: 3.15, yb: 0.0, yt: 1.45, rt: 0.6, rb: 0.35 },
+  ], M.gWhite));
+  // Command module: a gunmetal block over the nose.
+  shell.add(loft([
+    { z: 2.3, w: 3.05, yb: -0.02, yt: 1.38, rt: 0.22, rb: 0.2 },
+    { z: 4.35, w: 3.05, yb: -0.02, yt: 1.3, rt: 0.22, rb: 0.2 },
+    { z: 4.7, w: 2.75, yb: 0.08, yt: 1.08, rt: 0.2, rb: 0.18 },
+  ], M.gGrey));
+  shell.add(box(2.4, 0.1, 7.6, M.black, 0, -0.04, -0.6)); // belly pan
+
+  // Glowing hex-grid panels: two slanted on top of the module, one each side.
+  const panel = (w, d, x, y, z, rx, rz = 0) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.set(rx, 0, rz);
+    g.add(box(w + 0.08, 0.05, d + 0.08, M.black, 0, -0.02, 0));
+    g.add(box(w, 0.05, d, M.gPanel, 0, 0.01, 0));
+    for (let i = 1; i < 4; i++) g.add(box(w, 0.06, 0.012, M.black, 0, 0.012, -d / 2 + (i * d) / 4));
+    for (let i = 1; i < 3; i++) g.add(box(0.012, 0.06, d, M.black, -w / 2 + (i * w) / 3, 0.012, 0));
+    for (let i = 0; i < 4; i++) g.add(box(Math.hypot(w, d) * 0.9, 0.06, 0.01, M.black, 0, 0.012, 0).rotateY(0.6 + i * 0.12));
+    shell.add(g);
+  };
+  for (const sd of [-1, 1]) {
+    panel(1.05, 1.1, sd * 0.68, 1.38, 3.55, -0.2);
+    panel(0.95, 0.75, sd * 1.54, 0.78, 3.55, 0, -sd * Math.PI / 2);
+  }
+  // Round dials between the panels, and a sliding pod on each shoulder.
+  for (const z of [2.75, 4.25]) {
+    shell.add(cyl(0.24, 0.27, 0.16, M.gGrey, 0, 1.42, z));
+    shell.add(cyl(0.18, 0.18, 0.04, M.gSteel, 0, 1.51, z));
+    shell.add(box(0.08, 0.06, 0.3, M.black, 0, 1.54, z));
+  }
+  for (const sd of [-1, 1]) {
+    shell.add(box(0.36, 0.22, 0.7, M.gGrey, sd * 1.2, 1.46, 2.75));
+    shell.add(box(0.06, 0.08, 0.3, M.tail, sd * 1.2, 1.58, 2.8));
+  }
+  // Front face: a pair of round camera eyes, lamps under them, grille slots, bumper.
+  for (const sd of [-1, 1]) {
+    shell.add(cyl(0.24, 0.24, 0.24, M.black, sd * 0.3, 0.72, 4.7, 'z'));
+    shell.add(new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.035, 8, 22), M.gWhite).translateX(sd * 0.3).translateY(0.72).translateZ(4.83));
+    shell.add(cyl(0.12, 0.12, 0.03, M.glassDark, sd * 0.3, 0.72, 4.83, 'z'));
+    shell.add(cyl(0.05, 0.05, 0.02, M.teal, sd * 0.3, 0.72, 4.85, 'z'));
+    shell.add(cyl(0.13, 0.13, 0.1, M.black, sd * 0.62, 0.42, 4.72, 'z'));
+    shell.add(cyl(0.1, 0.1, 0.03, M.tail, sd * 0.62, 0.42, 4.78, 'z'));
+    shell.add(cyl(0.13, 0.13, 0.1, M.black, sd * 0.95, 0.42, 4.68, 'z'));
+    shell.add(cyl(0.1, 0.1, 0.03, M.tail, sd * 0.95, 0.42, 4.74, 'z'));
+    for (let k = 0; k < 3; k++) shell.add(box(0.06, 0.06, 0.04, M.amber, sd * (0.62 + k * 0.16), 0.95, 4.72));
+  }
+  for (let k = 0; k < 5; k++) shell.add(box(1.2, 0.04, 0.05, M.black, 0, 0.12 + k * 0.08, 4.73));
+  shell.add(box(2.9, 0.22, 0.3, M.black, 0, -0.06, 4.75));
+  // A plate with the hull number on the module side: a white tag and dark text bars.
+  for (const sd of [-1, 1]) {
+    shell.add(box(0.03, 0.26, 0.8, M.gWhite, sd * 1.535, 0.3, 3.0));
+    for (let k = 0; k < 3; k++) shell.add(box(0.035, 0.04, 0.5 - k * 0.12, M.black, sd * 1.54, 0.38 - k * 0.08, 3.0));
+  }
+  // Work lamps along the back of the module roof.
+  shell.add(box(1.7, 0.12, 0.18, M.black, 0, 1.47, 3.32));
+  shell.add(box(1.5, 0.07, 0.03, M.amber, 0, 1.47, 3.42));
+  // Long-range light bar up on the nose.
+  shell.add(box(1.8, 0.14, 0.2, M.black, 0, 1.5, -3.2));
+  shell.add(box(1.6, 0.08, 0.03, M.headlight, 0, 1.5, -3.31));
+  for (const sd of [-1, 1]) shell.add(tube([sd * 0.8, 1.42, -3.1], [sd * 0.8, 1.5, -3.2], 0.03, M.metalDark));
+
+  // Hull seams: thin dark lines across the roof and down the flanks.
+  for (const z of [-3.0, -1.9, -0.6, 0.7, 1.9]) shell.add(box(2.4, 0.015, 0.025, M.gGrey, 0, 1.505, z));
+  for (const x of [-0.75, 0.75]) shell.add(box(0.025, 0.015, 5.0, M.gGrey, x, 1.505, -0.55));
+  for (const sd of [-1, 1]) {
+    shell.add(box(0.02, 0.03, 6.2, M.gGrey, sd * 1.626, 0.62, -0.9));
+    shell.add(box(0.02, 0.03, 3.4, M.gGrey, sd * 1.626, 1.05, -0.4));
+    for (const z of [-3.2, -1.6, 0.2, 1.8]) shell.add(box(0.02, 0.9, 0.025, M.gGrey, sd * 1.626, 0.62, z));
+    // A row of small inset service plates low along each side.
+    for (let k = 0; k < 6; k++) shell.add(box(0.03, 0.18, 0.34, k % 2 ? M.gGrey : M.black, sd * 1.63, 0.3, -2.9 + k * 0.85));
+    // The X-braced vent slot behind the module.
+    shell.add(box(0.05, 0.36, 1.5, M.black, sd * 1.61, 1.02, 1.55));
+    for (const r of [-1, 1]) shell.add(box(0.06, 0.04, 1.6, M.gSteel, sd * 1.635, 1.02, 1.55).rotateX(r * 0.22));
+    // Grab handles, red status dots, a little hazard tab.
+    shell.add(tube([sd * 1.66, 0.85, -1.9], [sd * 1.66, 0.85, -1.3], 0.025, M.gSteel));
+    for (let k = 0; k < 4; k++) shell.add(box(0.03, 0.04, 0.04, k ? M.tail : M.teal, sd * 1.63, 1.18, -2.6 + k * 0.12));
+    shell.add(box(0.03, 0.12, 0.3, M.hazard, sd * 1.63, 0.95, -3.4));
+    // Cables running back from the module along the shoulder.
+    shell.add(tube([sd * 1.38, 1.36, 2.25], [sd * 1.45, 1.3, 0.5], 0.035, M.black));
+    shell.add(tube([sd * 1.45, 1.3, 0.5], [sd * 1.5, 1.2, -1.2], 0.035, M.black));
+  }
+  // Roof: a row of three hatches (one hazard-striped), a round hatch, a sensor dome
+  // with two whip antennas, a beacon at the back.
+  for (let k = 0; k < 3; k++) {
+    shell.add(box(0.62, 0.05, 0.55, M.gGrey, -0.2 + k * 0.7 - 0.5, 1.52, 1.2));
+    shell.add(box(0.5, 0.06, 0.06, M.black, -0.2 + k * 0.7 - 0.5, 1.53, 1.0));
+  }
+  shell.add(box(0.62, 0.055, 0.2, M.hazard, 0.9, 1.53, 1.2));
+  shell.add(cyl(0.34, 0.34, 0.06, M.gGrey, -0.7, 1.52, -0.3));
+  const hatchRing = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.03, 8, 24), M.gSteel);
+  hatchRing.rotation.x = Math.PI / 2;
+  hatchRing.position.set(-0.7, 1.55, -0.3);
+  shell.add(hatchRing);
+  shell.add(box(0.36, 0.07, 0.06, M.gSteel, -0.7, 1.57, -0.3));
+  shell.add(cyl(0.16, 0.2, 0.18, M.gGrey, 0.35, 1.58, 0.3));
+  shell.add(mesh(new THREE.SphereGeometry(0.22, 16, 10), M.gSteel, 0.35, 1.78, 0.3));
+  shell.add(cyl(0.08, 0.08, 0.04, M.glassDark, 0.35, 1.78, 0.5, 'z'));
+  for (const x of [0.05, 0.65]) {
+    shell.add(cyl(0.05, 0.06, 0.1, M.black, x, 1.55, 0.75));
+    shell.add(tube([x, 1.55, 0.75], [x, 2.6, 0.75], 0.012, M.metalDark));
+    shell.add(mesh(new THREE.SphereGeometry(0.03, 6, 4), M.tail, x, 2.62, 0.75));
+  }
+  shell.add(cyl(0.12, 0.14, 0.2, M.gGrey, 0, 1.36, -3.95));
+  shell.add(cyl(0.08, 0.08, 0.08, M.amber, 0, 1.5, -3.95));
+  // Nose: twin headlamp pods each side, amber running lights, a bumper bar.
+  for (const sd of [-1, 1]) {
+    for (const dx of [0.62, 0.95]) {
+      shell.add(cyl(0.15, 0.13, 0.24, M.black, sd * dx, 0.62, -4.16, 'z'));
+      shell.add(cyl(0.12, 0.12, 0.03, M.headlight, sd * dx, 0.62, -4.29, 'z'));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.02, 6, 20), M.gSteel);
+      ring.position.set(sd * dx, 0.62, -4.3);
+      shell.add(ring);
+    }
+    shell.add(box(0.14, 0.08, 0.05, M.amber, sd * 0.4, 0.62, -4.24));
+  }
+  shell.add(box(2.4, 0.2, 0.25, M.black, 0, 0.18, -4.25));
+  // A little ladder up the back of the module.
+  for (const sd of [-1, 1]) shell.add(box(0.04, 0.9, 0.04, M.gSteel, 1.12 + sd * 0.22, 0.6, 4.8));
+  for (let k = 0; k < 4; k++) shell.add(box(0.44, 0.035, 0.04, M.gSteel, 1.12, 0.25 + k * 0.22, 4.8));
+
+  const setPanels = buildPanels(root, { x: 1.0, y: 1.53, z: 1.1 });
+  const yokePivot = new THREE.Group();
+  yokePivot.position.set(0.45, 0.9, -3.4);
+  root.add(yokePivot);
+  return { yokePivot, setPanels, tailLamps: [V(0.62, 0.42, -4.8), V(-0.62, 0.42, -4.8)] };
 }
 
 // ---------- pilots ----------
@@ -1303,11 +1896,13 @@ function speedsterBody(shell, root) {
 export function buildVehicle() {
   const root = new THREE.Group();
   const shell = new THREE.Group(); // static body, merged at the end
-  const { yokePivot, setPanels, tailLamps } = ({ truck: truckBody, crawler: crawlerBody, hauler: haulerBody, buggy: buggyBody, speedster: speedsterBody }[CHASSIS])(shell, root);
+  const { yokePivot, setPanels, tailLamps, setThrust = () => {} } = ({ truck: truckBody, crawler: crawlerBody, hauler: haulerBody, buggy: buggyBody, speedster: speedsterBody, galatea: galateaBody, glider: gliderBody }[CHASSIS])(shell, root);
 
   // Wheels + suspension, one corner per entry in the shared wheel table.
   const wheels = WHEEL_DEFS.map((d) => {
-    const setCorner = buildCorner(shell, root, d.s, d.z, Math.abs(d.x), d.my);
+    const setCorner = SPEC.legs
+      ? (d.axle === 0 ? buildLeg(shell, root, d.s, d.z, Math.abs(d.x), d.my) : buildBogie(shell, root, d.s, d.z, Math.abs(d.x), d.my, d.axle))
+      : buildCorner(shell, root, d.s, d.z, Math.abs(d.x), d.my);
     const hub = new THREE.Group();
     const steer = new THREE.Group();
     const spin = buildWheel();
@@ -1352,5 +1947,5 @@ export function buildVehicle() {
     DIRT.inv.value.copy(root.matrixWorld).invert();
   }
 
-  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, setDirt, TAIL_LAMPS: tailLamps, MOUNTS: SPEC.mounts };
+  return { root, wheels, setSuspension, setSteer, setPanels, setBrake, setDirt, setThrust, TAIL_LAMPS: tailLamps, MOUNTS: SPEC.mounts };
 }

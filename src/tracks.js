@@ -21,8 +21,11 @@ const TINTS = {
   moon: [0xa4a4a0, 0x464646],
   verdanta: [0x6e5c44, 0x2e241a],
 }[PLANET] || [0xc08a5a, 0x6a3e26];
-const BERM = new THREE.Color(TINTS[0]).toArray(); // dust thrown clear of the tyre
-const FLOOR = new THREE.Color(TINTS[1]).toArray(); // packed down under it
+// Scaled down to the ground's own albedo: the terrain is darkened by its texture
+// layers and these flat colours are not, so at full strength the ruts glowed as pale
+// lines across the ground at night.
+const BERM = new THREE.Color(TINTS[0]).multiplyScalar(0.5).toArray(); // dust thrown clear of the tyre
+const FLOOR = new THREE.Color(TINTS[1]).multiplyScalar(0.5).toArray(); // packed down under it
 const LANES = [
   { off: -1.05, lift: 0.005, tint: BERM },
   { off: -0.7, lift: 0.17, tint: BERM },

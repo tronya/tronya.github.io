@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { groundHeight, landmarkWall, landmarkPoles } from './terrain.js';
+import { groundHeight, landmarkWall, landmarkPoles, setDeckRef, waterDepthAt, waterLevelAt } from './terrain.js';
 import { WHEEL_R, SUSP } from './vehicle.js';
 import { SPEC, WHEEL_DEFS, AXLE_PAIRS, steerAngle } from './chassis.js';
 import { PLANET } from './planet.js';
@@ -91,6 +91,7 @@ const AWD_DOWN = 36 / 3.6;
 const V_MAX_RWD = SPEC.vMaxRwd ?? 100 / 3.6; // ~28 m/s — the whole point of dropping the front axle
 // Steering behaves like a wheel, not a spring: the angle stays where it is left.
 const MECH_STEER = 0.56; // mechanical lock at the knuckle
+const SKID = !!SPEC.skidSteer; // tank-style: steer by driving the two sides apart
 // Time to wind the wheel from centre to full lock. Scaling the rate to the current
 // lock keeps that time the same at any speed; a fixed rad/s hit the (small) lock at
 // speed in a fifth of a second, so a tap was full opposite lock.
@@ -306,6 +307,8 @@ export class VehicleSim {
     // trips over its own grip and can genuinely roll, instead of being kept safe.
     const maxSteer = MECH_STEER;
     this.maxSteer = maxSteer;
+    // A skid-steered rover turns on the spot: holding the wheel is not parking.
+    if (SKID && Math.abs(input.steer || input.steerTo || 0) > 0.02) c.parked = false;
     if (input.steerTo !== undefined) {
       c.steer = damp(c.steer, clamp(input.steerTo, -1, 1) * maxSteer, 5, dt);
     } else {
@@ -457,6 +460,7 @@ export class VehicleSim {
   }
 
   step(h) {
+    setDeckRef(this.pos.y); // a bridge deck is ground only to something up at its level
     const { quat: q, pos, vel, angVel, cmd, wheels } = this;
     up.set(0, 1, 0).applyQuaternion(q);
     fwd.set(0, 0, 1).applyQuaternion(q);
@@ -624,10 +628,28 @@ export class VehicleSim {
       else {
         const resist = cmd.brake * BRAKE_FORCE + ROLLING_RES * this.rollMul * N + (DRAG_V2 * this.dragMul * vx * vx) / NW;
         const isDriven = this.awd || !w.front;
-        const drive = isDriven ? this.driveForce(cmd.throttle, speed) / driven : 0;
-        Fx = drive - resist * Math.tanh(vx / 0.4);
+        // Skid steer (tank-style): no wheel turns; one side is driven harder, or the
+        // other way, than the other. Steering left slows or reverses the left side.
+        let thr = cmd.throttle;
+        let skidBrake = 0;
+        if (SKID) {
+          const st = cmd.steer / MECH_STEER; // + is a left turn
+          if (Math.abs(cmd.throttle) < 0.05) {
+            thr = -w.s * st * 0.32; // on the spot: the two sides drive opposite ways
+          } else if (w.s * st > 0) {
+            // On the move the inside track lets off, then drags: that is the turn.
+            const a = Math.abs(st);
+            thr = cmd.throttle * (1 - 0.75 * a);
+            skidBrake = a * 0.3 * BRAKE_FORCE * Math.min(1, Math.abs(speed) / 2);
+          }
+        }
+        const drive = isDriven ? this.driveForce(thr, speed) / driven : 0;
+        Fx = drive - (resist + skidBrake) * Math.tanh(vx / 0.4);
       }
       let Fy = -grip * Math.tanh(vy / (cmd.parked ? 0.05 : 0.15));
+      // Turning a skid-steer means scrubbing every tyre sideways; the tread lets go
+      // a little so the hull can swing at all.
+      if (SKID) Fy *= 1 - 0.4 * Math.min(1, Math.abs(cmd.steer / MECH_STEER) * 1.5);
       const mag = Math.hypot(Fx, Fy);
       // Soft-knee onto the friction circle instead of a hard clip: comfortably under
       // the limit this changes almost nothing, but the approach to it is a squeeze,
@@ -673,5 +695,165 @@ export class VehicleSim {
     pos.addScaledVector(vel, h);
     dq.set(angVel.x * h * 0.5, angVel.y * h * 0.5, angVel.z * h * 0.5, 0).multiply(q);
     q.set(q.x + dq.x, q.y + dq.y, q.z + dq.z, q.w + dq.w).normalize();
+  }
+}
+
+// ---------- the hover glider ----------
+// No wheels at all: a body held up on lift fans at a chosen height over whatever is
+// underneath — ground, rocks, a bridge deck or water — and pushed along by its rear
+// turbines. Shift climbs, Ctrl sinks (to 15 m at most); W/S and A/D as usual. It
+// cannot roll over: it banks into turns and pitches with the throttle, for the look.
+// Same public shape as VehicleSim, so the rest of the game drives it unchanged.
+const HV = {
+  altMin: 0.7, // lowest hover: belly a hand's breadth over the ground
+  altMax: 15,
+  climb: 4.5, // m/s the target height moves while Shift/Ctrl is held
+  belly: 0.75, // origin above the lowest point of the hull
+  k: 7, // height spring, 1/s²
+  c: 4.5, // and its damping, 1/s
+  acc: 9, // m/s² of push at full throttle
+  turn: 1.15, // rad/s of yaw at full lock
+  sink: 3, // m/s: how fast it lets itself down when the ground falls away
+};
+const _hvOut = { x: 0, z: 0 };
+const _hvE = new THREE.Euler(0, 0, 0, 'YXZ');
+export class HoverSim {
+  constructor() {
+    this.pos = new THREE.Vector3();
+    this.quat = new THREE.Quaternion();
+    this.vel = new THREE.Vector3();
+    this.angVel = new THREE.Vector3();
+    this.cmd = { throttle: 0, brake: 0, steer: 0, parked: false, boost: false };
+    this.speed = 0;
+    this.upY = 1;
+    this.maxSteer = 1;
+    this.awd = true;
+    this.powerMul = 1;
+    this.suspMul = 1;
+    this.gripMul = 1;
+    this.rollMul = 1;
+    this.dragMul = 1;
+    this.wheels = [];
+    this.alt = HV.altMin; // target height of the belly over the ground
+    this.heading = 0;
+    this.yawRate = 0;
+    this.pitch = 0;
+    this.bank = 0;
+    this.reset(0, 0, 0.6);
+  }
+
+  reset(x, z, heading) {
+    this.heading = heading;
+    this.alt = HV.altMin;
+    this.gRef = this.floor(x, z);
+    this.pos.set(x, this.gRef + HV.altMin + HV.belly, z);
+    this.vel.set(0, 0, 0);
+    this.angVel.set(0, 0, 0);
+    this.yawRate = 0;
+    this.pitch = 0;
+    this.bank = 0;
+    this.cmd.throttle = 0;
+    this.cmd.steer = 0;
+    this.refresh();
+  }
+
+  // What it hovers over: ground (with rocks and bridge decks) or the water surface.
+  floor(x, z) {
+    setDeckRef(this.pos.y);
+    const g = groundHeight(x, z);
+    return waterDepthAt(x, z) > 0 ? Math.max(g, waterLevelAt(x, z)) : g;
+  }
+
+  origin(out) {
+    return out.copy(this.pos);
+  }
+
+  yaw() {
+    return this.heading;
+  }
+
+  refresh() {
+    this.quat.setFromEuler(_hvE.set(this.pitch, this.heading, this.bank));
+    this.upY = Math.cos(this.pitch) * Math.cos(this.bank);
+    this.speed = this.vel.x * Math.sin(this.heading) + this.vel.z * Math.cos(this.heading);
+  }
+
+  // input: throttle, steer (left +), brake, climb (-1..1: Ctrl..Shift), steerTo (autopilot)
+  update(dt, input) {
+    dt = Math.min(dt, 0.05);
+    const c = this.cmd;
+    c.throttle = damp(c.throttle, clamp(input.throttle || 0, -1, 1), 6, dt);
+    const want = input.steerTo !== undefined ? clamp(input.steerTo, -1, 1) : clamp(input.steer || 0, -1, 1);
+    c.steer = damp(c.steer, want, 6, dt);
+    c.brake = input.brake || 0;
+    c.boost = false;
+    c.parked = false;
+    this.alt = clamp(this.alt + (input.climb || 0) * HV.climb * dt, HV.altMin, HV.altMax);
+
+    // Hold the height over the ground here and a little ahead, so it rises over a
+    // ridge before reaching it instead of ploughing into the face.
+    const p = this.pos;
+    const v = this.vel;
+    const g0 = this.floor(p.x, p.z);
+    const gA = this.floor(p.x + v.x * 0.7, p.z + v.z * 0.7);
+    const gB = this.floor(p.x + v.x * 1.4, p.z + v.z * 1.4);
+    const ground = Math.max(g0, gA - 0.5, gB - 1.5);
+    // Rising ground is followed at once; ground that drops away (a cliff edge, a
+    // canyon) is followed down gently, so it glides out over the drop instead of
+    // falling into it.
+    this.gRef = ground > this.gRef ? ground : Math.max(ground, this.gRef - HV.sink * dt);
+    const target = this.gRef + this.alt + HV.belly;
+    v.y += (HV.k * (target - p.y) - HV.c * v.y) * dt;
+
+    // Push along the heading; drag sets the top speed; sideways drift dies away.
+    const fx = Math.sin(this.heading);
+    const fz = Math.cos(this.heading);
+    // The motor upgrade buys a little more top speed and a lot more shove.
+    const vMax = SPEC.vMax * (1 + 0.15 * (this.powerMul - 1));
+    const acc = HV.acc * (1 + 0.4 * (this.powerMul - 1));
+    let vf = v.x * fx + v.z * fz;
+    let vs = v.x * fz - v.z * fx;
+    vf += c.throttle * acc * dt;
+    vf -= vf * (acc / vMax) * dt * (c.throttle * vf > 0 ? 1 : 0.6);
+    if (c.brake) vf *= Math.exp(-2.5 * dt);
+    vs *= Math.exp(-2.2 * dt);
+    v.x = fx * vf + fz * vs;
+    v.z = fz * vf - fx * vs;
+
+    // Turning: yaw rate eases toward the stick; a little less at full speed.
+    const turnWant = c.steer * HV.turn * (1 - 0.3 * Math.min(1, Math.abs(vf) / vMax));
+    this.yawRate = damp(this.yawRate, turnWant, 4, dt);
+    this.heading += this.yawRate * dt;
+
+    p.addScaledVector(v, dt);
+
+    // Never through the ground: a hard floor under the belly.
+    const gNow = this.floor(p.x, p.z);
+    if (p.y < gNow + 0.35) {
+      p.y = gNow + 0.35;
+      if (v.y < 0) v.y = 0;
+    }
+    // Buildings and other solids push it out sideways, losing the speed into them.
+    const depth = landmarkWall(p.x, p.y - HV.belly + 0.3, p.z, _hvOut);
+    if (depth > 0) {
+      p.x += _hvOut.x * depth;
+      p.z += _hvOut.z * depth;
+      const into = v.x * _hvOut.x + v.z * _hvOut.z;
+      if (into < 0) {
+        v.x -= _hvOut.x * into * 1.3;
+        v.z -= _hvOut.z * into * 1.3;
+      }
+    }
+
+    // Lean for the look: nose dips under thrust, it banks into a turn.
+    this.pitch = damp(this.pitch, clamp(-c.throttle * 0.08 + v.y * 0.015, -0.2, 0.2), 3, dt);
+    this.bank = damp(this.bank, clamp(-this.yawRate * vf * 0.03, -0.35, 0.35), 3, dt);
+    this.angVel.set(0, this.yawRate, 0);
+    this.refresh();
+  }
+
+  // How high the belly is over what's below (for the HUD and the shadow).
+  height() {
+    return this.pos.y - HV.belly - this.floor(this.pos.x, this.pos.z);
   }
 }

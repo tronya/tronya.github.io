@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { terrainHeight, surfaceHeight, pebbleDensity } from './terrain.js';
+import { terrainHeight, surfaceHeight, pebbleDensity, deckHeight } from './terrain.js';
 import { PLANET } from './planet.js';
 
 // Loose angular rocks lying on the ground around the rover. There are only a couple
@@ -151,6 +151,8 @@ export function createSand({ count = 2800, radius = 120 } = {}) {
     lieDown(i);
     // This slot is only a rock here if the ground is stony here.
     on[i] = Math.random() < pebbleDensity(x, z) * DENSITY_SCALE ? 1 : 0;
+    // None on a bridge (or under one): its deck is swept steel, not a stony plain.
+    if (deckHeight(x, z) > -Infinity) on[i] = 0;
     writeMatrix(i);
   }
 
