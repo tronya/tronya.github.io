@@ -15,6 +15,7 @@ export const PROJECTS = [
 {
     id: 'okko',
     kind: 'project',
+    alsoOnGames: true, // not a game, but listed in /games/ too
     title: 'Okko — Raspberry Pi AI assistant',
     url: 'https://github.com/tronya/raspbery-pi-ai-assistant',
     year: 2026,

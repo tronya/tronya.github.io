@@ -19,6 +19,6 @@ function card(p) {
 // Fills every [data-projects] element; data-kind narrows it to one kind.
 for (const el of document.querySelectorAll('[data-projects]')) {
   const kind = el.dataset.kind;
-  const list = PROJECTS.filter((p) => !kind || p.kind === kind);
+  const list = PROJECTS.filter((p) => !kind || p.kind === kind || (kind === 'game' && p.alsoOnGames));
   el.innerHTML = list.length ? list.map(card).join('') : '<p>Nothing here yet.</p>';
 }
