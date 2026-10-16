@@ -22,4 +22,14 @@ export const PROJECTS = [
     tags: ['Raspberry Pi', 'Python', 'Ollama', 'OpenCV', 'Telegram'],
     blurb: 'A desk companion for a Raspberry Pi 4 with a 3.5" touch screen and a camera: animated eyes that follow your face and mirror your expression, a Telegram chat with a local language model, work-time tracking, air-raid alerts and home-battery monitoring. Everything runs on the Pi.',
   },
+  {
+    id: 'particles',
+    kind: 'project',
+    title: 'Particles — planets and a clock',
+    url: '/particles/',
+    repo: 'https://github.com/tronya/particles',
+    year: 2026,
+    tags: ['Three.js', 'WebGL', 'GPU physics', 'webcam'],
+    blurb: 'About 150,000 GPU particles with their own physics: three planets with tunable attraction and repulsion that you can drag around, a webcam mode that paints your face with particles, and a clock screensaver where particles orbit the digits like satellites.',
+  },
 ];
